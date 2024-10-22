@@ -6,4 +6,4 @@ pyaudio
 wave
 openai
 qianfan
-appbuilder
+appbuilder-sdk

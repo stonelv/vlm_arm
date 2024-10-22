@@ -29,8 +29,11 @@ def agent_play():
     '''
     主函数，语音控制机械臂智能体编排动作
     '''
+    
+    show_robot_status()
+    
     # 归零
-    back_zero()
+    #back_zero()
     
     # print('测试摄像头')
     # check_camera()
