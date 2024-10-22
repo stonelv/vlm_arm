@@ -1,0 +1,9 @@
+numpy
+opencv-python
+pymycobot
+RPi.GPIO
+pyaudio
+wave
+openai
+qianfan
+appbuilder
