@@ -3,35 +3,43 @@
 # GPIO引脚、吸泵相关函数
 
 print('导入吸泵控制模块')
-import RPi.GPIO as GPIO
 import time
 
-# 初始化GPIO
-GPIO.setwarnings(False)   # 不打印 warning 信息
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(20, GPIO.OUT)
-GPIO.setup(21, GPIO.OUT)
-GPIO.output(20, 1)        # 关闭吸泵电磁阀
+try:
+    import RPi.GPIO as GPIO
+    # 初始化GPIO
+    GPIO.setwarnings(False)   # 不打印 warning 信息
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(20, GPIO.OUT)
+    GPIO.setup(21, GPIO.OUT)
+    GPIO.output(20, 1)        # 关闭吸泵电磁阀
+    GPIO_AVAILABLE = True
+except ImportError:
+    # 在非树莓派环境下，模拟GPIO功能
+    print('警告：未找到RPi.GPIO库，将使用模拟模式')
+    GPIO_AVAILABLE = False
 
 def pump_on():
     '''
     开启吸泵
     '''
     print('    开启吸泵')
-    GPIO.output(20, 0)
+    if GPIO_AVAILABLE:
+        GPIO.output(20, 0)
 
 def pump_off():
     '''
     关闭吸泵，吸泵放气，释放物体
     '''
     print('    关闭吸泵')
-    GPIO.output(20, 1)   # 关闭吸泵电磁阀
-    time.sleep(0.05)
-    GPIO.output(21, 0)   # 打开泄气阀门
-    time.sleep(0.2)
-    GPIO.output(21, 1)
-    time.sleep(0.05)
-    GPIO.output(21, 0)   # 再一次泄气，确保物体释放
-    time.sleep(0.2)
-    GPIO.output(21, 1)
-    time.sleep(0.05)
+    if GPIO_AVAILABLE:
+        GPIO.output(20, 1)   # 关闭吸泵电磁阀
+        time.sleep(0.05)
+        GPIO.output(21, 0)   # 打开泄气阀门
+        time.sleep(0.2)
+        GPIO.output(21, 1)
+        time.sleep(0.05)
+        GPIO.output(21, 0)   # 再一次泄气，确保物体释放
+        time.sleep(0.2)
+        GPIO.output(21, 1)
+        time.sleep(0.05)
