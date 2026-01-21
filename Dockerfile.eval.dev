@@ -1,0 +1,43 @@
+# =============================================================================
+# vlm_arm Coding Agent 开发环境 Dockerfile
+# 用于 Claude Code 等 Coding Agent 进入容器进行开发工作
+# =============================================================================
+
+ARG PYTHON_VERSION=3.11
+FROM python:${PYTHON_VERSION}-slim
+
+# 代码包下载地址
+ARG CODE_URL=https://deep-evaluation-set.tos-cn-beijing.volces.com/vlm_arm-e2afd345a4988c16783777265b4cbd32dd55cb82.zip
+
+# Python 环境变量（标准配置，照抄即可）
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=off \
+    PIP_DISABLE_PIP_VERSION_CHECK=on
+
+# 第一步：安装系统依赖和开发工具
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    build-essential \
+    curl \
+    wget \
+    unzip \
+    vim \
+    less \
+    htop \
+    procps \
+    net-tools \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# 第二步：下载并解压代码（重要！）
+RUN wget -O /tmp/code.zip ${CODE_URL} && \
+    unzip /tmp/code.zip -d /tmp && \
+    mv /tmp/vlm_arm-* /workspace && \
+    rm -rf /workspace/.git && \
+    rm /tmp/code.zip
+
+WORKDIR /workspace
+
+# 第三步：安装 Python 依赖
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
