@@ -1029,17 +1029,23 @@ class SafeActionExecutor:
     def __init__(self, 
                  simulation_mode: bool = True,
                  constraints: Optional[SafetyConstraints] = None,
-                 port: str = None):
+                 port: str = None,
+                 baud: int = None):
         """
         初始化安全动作执行器
         
         Args:
             simulation_mode: 是否使用仿真模式
             constraints: 安全约束配置
-            port: 机械臂串口（真机模式使用）
+            port: 机械臂串口（真机模式使用，如 "/dev/ttyUSB0" 或 "COM3"）
+            baud: 机械臂波特率（真机模式使用，默认 115200）
         """
         self.simulation_mode = simulation_mode
         self.constraints = constraints or SafetyConstraints()
+        
+        # 真机连接参数
+        self._port = port
+        self._baud = baud
         
         # 组件初始化
         self.robot: Optional[RobotArmInterface] = None
@@ -1059,6 +1065,8 @@ class SafeActionExecutor:
         self.logger = logging.getLogger('SafeActionExecutor')
         self.logger.info(f"Initializing SafeActionExecutor in "
                         f"{'SIMULATION' if simulation_mode else 'REAL'} mode")
+        if not simulation_mode and port:
+            self.logger.info(f"  Port: {port}, Baud: {baud or 'default'}")
     
     def initialize(self) -> bool:
         """初始化执行器 - 连接机械臂"""
@@ -1071,7 +1079,8 @@ class SafeActionExecutor:
             if self.simulation_mode:
                 self.robot = SimulatedRobotArm()
             else:
-                self.robot = MyCobotRobotArm(port=self.constraints.workspace_limits.get('port'))
+                # 真机模式：使用传入的端口和波特率参数
+                self.robot = MyCobotRobotArm(port=self._port, baud=self._baud)
             
             # 尝试连接
             if not self.robot.connect():

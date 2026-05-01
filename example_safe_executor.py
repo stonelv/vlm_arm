@@ -336,17 +336,64 @@ def example_6_real_vs_simulated():
     print("""
     安全动作执行器提供了统一的接口，代码在仿真模式和真机模式下无需修改。
     
-    仿真模式:
-        executor = SafeActionExecutor(simulation_mode=True)
-        或
-        executor = create_executor(simulation=True)
+    ==================================================================
+    一、仿真模式 (用于测试和调试，无需连接真实机械臂)
+    ==================================================================
     
-    真机模式:
-        executor = SafeActionExecutor(simulation_mode=False)
-        或
-        executor = create_executor(simulation=False)
+    # 方式1: 使用 create_executor 便捷函数
+    executor = create_executor(simulation=True)
     
-    两种模式下使用完全相同的 API:
+    # 方式2: 直接使用 SafeActionExecutor
+    executor = SafeActionExecutor(simulation_mode=True)
+    executor.initialize()
+    
+    ==================================================================
+    二、真机模式 (连接真实 MyCobot 机械臂)
+    ==================================================================
+    
+    注意：真机模式需要安装 pymycobot 库:
+        pip install pymycobot
+    
+    方式1: 使用默认端口（自动检测，适用于树莓派）
+    executor = create_executor(simulation=False)
+    
+    方式2: 指定串口和波特率
+    # Linux/Raspberry Pi: "/dev/ttyUSB0", "/dev/ttyAMA0", "/dev/ttyACM0"
+    # Windows: "COM3", "COM5" 等
+    # Mac: "/dev/tty.usbserial-1410" 等
+    
+    executor = SafeActionExecutor(
+        simulation_mode=False,
+        port="/dev/ttyUSB0",      # 串口设备路径
+        baud=115200                # 波特率（可选，默认 115200）
+    )
+    executor.initialize()
+    
+    # 或使用便捷函数
+    executor = create_executor(
+        simulation=False,
+        port="/dev/ttyUSB0",
+        baud=115200
+    )
+    
+    ==================================================================
+    三、常用端口说明
+    ==================================================================
+    
+    | 平台          | 常用端口                          |
+    |---------------|-----------------------------------|
+    | Raspberry Pi  | /dev/ttyAMA0 (默认), /dev/ttyUSB0|
+    | Windows       | COM3, COM5 (查看设备管理器)      |
+    | Mac           | /dev/tty.usbserial-*             |
+    | Linux (PC)    | /dev/ttyUSB0, /dev/ttyACM0       |
+    
+    波特率: MyCobot 默认 115200
+    
+    ==================================================================
+    四、统一的 API (两种模式下使用方式完全相同)
+    ==================================================================
+    
+    以下代码在仿真和真机模式下无需修改:
         - executor.execute_from_dict(...)
         - executor.execute_command(...)
         - executor.execute_from_llm(...)
