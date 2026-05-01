@@ -303,6 +303,7 @@ class EnhancedRecorder:
         self.record_list: List[TrajectoryPoint] = []
         self.record_thread = None
         self.pump_state = False
+        self.record_start_time: float = 0.0
         
         if HAS_GPIO and not pump_controller:
             GPIO.setwarnings(False)
@@ -334,11 +335,11 @@ class EnhancedRecorder:
         self.record_list = []
         self.recording = True
         self.pump_state = False
+        self.record_start_time = time.time()
         
         def _record():
-            start_time = time.time()
             while self.recording:
-                current_time = time.time() - start_time
+                current_time = time.time() - self.record_start_time
                 
                 angles = None
                 coords = None
@@ -376,10 +377,7 @@ class EnhancedRecorder:
         if not self.recording:
             return
         
-        current_time = time.time()
-        if self.record_list:
-            start_time = self.record_list[0].timestamp
-            current_time -= start_time
+        current_time = time.time() - self.record_start_time
         
         event_data = {
             "type": event_type.value,
@@ -399,7 +397,7 @@ class EnhancedRecorder:
         elif event_type == EventType.PUMP_OFF:
             self.pump_off()
         
-        print(f"\n已记录事件: {event_type.value}")
+        print(f"\n已记录事件: {event_type.value} (时间戳: {current_time:.3f}s)")
     
     def stop_recording(self) -> List[TrajectoryPoint]:
         if self.recording:
@@ -536,18 +534,28 @@ class SkillLibrary:
         
         print(f"已加载 {len(self.skills)} 个基础技能, {len(self.composite_skills)} 个复合技能")
     
-    def save_skill(self, skill: Skill):
+    def add_skill(self, skill: Skill, save_to_file: bool = False):
         if isinstance(skill, CompositeSkill):
-            filepath = self._get_skill_path(skill.name, is_composite=True)
             self.composite_skills[skill.name] = skill
+            if save_to_file:
+                filepath = self._get_skill_path(skill.name, is_composite=True)
+                with open(filepath, "w", encoding="utf-8") as f:
+                    json.dump(skill.to_dict(), f, indent=2, ensure_ascii=False)
+                print(f"复合技能已保存: {skill.name} -> {filepath}")
+            else:
+                print(f"复合技能已添加到内存: {skill.name}")
         else:
-            filepath = self._get_skill_path(skill.name, is_composite=False)
             self.skills[skill.name] = skill
-        
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(skill.to_dict(), f, indent=2, ensure_ascii=False)
-        
-        print(f"技能已保存: {skill.name} -> {filepath}")
+            if save_to_file:
+                filepath = self._get_skill_path(skill.name, is_composite=False)
+                with open(filepath, "w", encoding="utf-8") as f:
+                    json.dump(skill.to_dict(), f, indent=2, ensure_ascii=False)
+                print(f"技能已保存: {skill.name} -> {filepath}")
+            else:
+                print(f"技能已添加到内存: {skill.name}")
+    
+    def save_skill(self, skill: Skill):
+        self.add_skill(skill, save_to_file=True)
     
     def load_skill(self, name: str) -> Optional[Skill]:
         if name in self.skills:
@@ -646,6 +654,10 @@ class SkillExecutor:
         for point in trajectory:
             new_point = deepcopy(point)
             
+            if height_offset != 0.0 and new_point.coords and len(new_point.coords) >= 3:
+                new_point.coords = new_point.coords.copy()
+                new_point.coords[2] += height_offset
+            
             if start_angles is not None or end_angles is not None:
                 progress = 0.0
                 if len(trajectory) > 1:
@@ -727,12 +739,15 @@ class SkillExecutor:
                 
                 if HAS_PYMYCOBOT and self.mc:
                     try:
-                        self.mc.set_encoders(point.angles, speed)
+                        if point.coords and len(point.coords) >= 6:
+                            self.mc.send_coords(point.coords, speed, 0)
+                        else:
+                            try:
+                                self.mc.set_encoders(point.angles, speed)
+                            except Exception:
+                                self.mc.send_angles(point.angles, speed)
                     except Exception as e:
-                        try:
-                            self.mc.send_angles(point.angles, speed)
-                        except Exception as e2:
-                            print(f"运动控制错误: {e2}")
+                        print(f"运动控制错误: {e}")
                 
                 if i < len(modified_trajectory) - 1:
                     next_point = modified_trajectory[i + 1]
@@ -831,8 +846,8 @@ class SkillComposer:
         return composite
 
 
-def create_demo_skills(library: SkillLibrary):
-    print("\n=== 创建演示技能 ===")
+def create_demo_skills(library: SkillLibrary, save_to_file: bool = False):
+    print("\n=== 创建演示技能 (运行时生成，默认不保存到文件) ===")
     
     pick_trajectory = [
         TrajectoryPoint(timestamp=0.0, angles=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], coords=[200, 0, 200, 0, 180, 90]),
@@ -852,12 +867,12 @@ def create_demo_skills(library: SkillLibrary):
         smoothed_trajectory=pick_trajectory,
         normalized_duration=4.0,
         parameters=[
-            SkillParameter(name="pick_xy", description="拾取位置XY坐标", param_type="list", default_value=[200, 0]),
-            SkillParameter(name="pick_height", description="拾取高度", param_type="float", default_value=100.0),
-            SkillParameter(name="safe_height", description="安全高度", param_type="float", default_value=200.0),
-            SkillParameter(name="speed", description="速度", param_type="float", default_value=1.0),
+            SkillParameter(name="start_angles", description="起始关节角度", param_type="list", default_value=pick_trajectory[0].angles),
+            SkillParameter(name="end_angles", description="目标关节角度", param_type="list", default_value=pick_trajectory[-1].angles),
+            SkillParameter(name="speed", description="运动速度比例 (0.1-2.0)", param_type="float", default_value=1.0, min_value=0.1, max_value=2.0),
+            SkillParameter(name="height_offset", description="高度偏移量 (应用于coords的Z轴)", param_type="float", default_value=0.0),
         ],
-        metadata={"demo": True}
+        metadata={"demo": True, "note": "这是演示技能，实际使用请通过EnhancedRecorder录制"}
     )
     
     move_trajectory = [
@@ -874,12 +889,12 @@ def create_demo_skills(library: SkillLibrary):
         smoothed_trajectory=move_trajectory,
         normalized_duration=2.0,
         parameters=[
-            SkillParameter(name="start_xy", description="起始XY坐标", param_type="list", default_value=[200, 0]),
-            SkillParameter(name="target_xy", description="目标XY坐标", param_type="list", default_value=[100, 180]),
-            SkillParameter(name="height", description="移动高度", param_type="float", default_value=200.0),
-            SkillParameter(name="speed", description="速度", param_type="float", default_value=1.0),
+            SkillParameter(name="start_angles", description="起始关节角度", param_type="list", default_value=move_trajectory[0].angles),
+            SkillParameter(name="end_angles", description="目标关节角度", param_type="list", default_value=move_trajectory[-1].angles),
+            SkillParameter(name="speed", description="运动速度比例 (0.1-2.0)", param_type="float", default_value=1.0, min_value=0.1, max_value=2.0),
+            SkillParameter(name="height_offset", description="高度偏移量 (应用于coords的Z轴)", param_type="float", default_value=0.0),
         ],
-        metadata={"demo": True}
+        metadata={"demo": True, "note": "这是演示技能，实际使用请通过EnhancedRecorder录制"}
     )
     
     place_trajectory = [
@@ -900,17 +915,17 @@ def create_demo_skills(library: SkillLibrary):
         smoothed_trajectory=place_trajectory,
         normalized_duration=4.0,
         parameters=[
-            SkillParameter(name="place_xy", description="放置位置XY坐标", param_type="list", default_value=[100, 180]),
-            SkillParameter(name="place_height", description="放置高度", param_type="float", default_value=100.0),
-            SkillParameter(name="safe_height", description="安全高度", param_type="float", default_value=200.0),
-            SkillParameter(name="speed", description="速度", param_type="float", default_value=1.0),
+            SkillParameter(name="start_angles", description="起始关节角度", param_type="list", default_value=place_trajectory[0].angles),
+            SkillParameter(name="end_angles", description="目标关节角度", param_type="list", default_value=place_trajectory[-1].angles),
+            SkillParameter(name="speed", description="运动速度比例 (0.1-2.0)", param_type="float", default_value=1.0, min_value=0.1, max_value=2.0),
+            SkillParameter(name="height_offset", description="高度偏移量 (应用于coords的Z轴)", param_type="float", default_value=0.0),
         ],
-        metadata={"demo": True}
+        metadata={"demo": True, "note": "这是演示技能，实际使用请通过EnhancedRecorder录制"}
     )
     
-    library.save_skill(pick_skill)
-    library.save_skill(move_skill)
-    library.save_skill(place_skill)
+    library.add_skill(pick_skill, save_to_file=save_to_file)
+    library.add_skill(move_skill, save_to_file=save_to_file)
+    library.add_skill(place_skill, save_to_file=save_to_file)
     
     print("已创建演示技能: pick_up, move, place_down")
     
@@ -922,8 +937,13 @@ def create_demo_skills(library: SkillLibrary):
         composite_name="pick_and_place"
     )
     
-    library.save_skill(composite_skill)
+    library.add_skill(composite_skill, save_to_file=save_to_file)
     print("已创建复合技能: pick_and_place")
+    
+    if save_to_file:
+        print(f"提示: 技能已保存到 {library.library_path}/")
+    else:
+        print("提示: 技能仅在内存中，调用 library.save_skill(skill) 可持久化到文件")
     
     return pick_skill, move_skill, place_skill, composite_skill
 
