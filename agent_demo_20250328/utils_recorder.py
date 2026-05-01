@@ -6,13 +6,31 @@ import os
 import json
 import time
 import shutil
-import cv2
 from datetime import datetime
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Any, Optional
 from enum import Enum
 
-RECORD_DIR = 'task_records'
+_cv2_available = None
+def _get_cv2():
+    '''惰性导入cv2，缺失时给出提示但不抛出异常'''
+    global _cv2_available
+    if _cv2_available is False:
+        return None
+    if _cv2_available is not None:
+        return _cv2_available
+    try:
+        import cv2
+        _cv2_available = cv2
+        return cv2
+    except ImportError:
+        _cv2_available = False
+        print('[Recorder] 警告: OpenCV(cv2) 未安装，相机帧保存功能不可用')
+        print('[Recorder] 其他记录功能（语音、VLM、动作执行）仍然可用')
+        return None
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RECORD_DIR = os.path.join(BASE_DIR, 'task_records')
 
 class TaskStatus(Enum):
     PENDING = 'pending'
@@ -95,6 +113,7 @@ class TaskRecorder:
     _instance = None
     _current_task: Optional[TaskRecord] = None
     _task_dir: Optional[str] = None
+    _task_ended: bool = False
     
     def __new__(cls):
         if cls._instance is None:
@@ -113,6 +132,7 @@ class TaskRecorder:
         timestamp = time.time()
         task_id = datetime.fromtimestamp(timestamp).strftime('%Y%m%d_%H%M%S')
         
+        self._task_ended = False
         self._task_dir = os.path.join(RECORD_DIR, task_id)
         os.makedirs(self._task_dir, exist_ok=True)
         os.makedirs(os.path.join(self._task_dir, 'images'), exist_ok=True)
@@ -161,7 +181,14 @@ class TaskRecorder:
         if isinstance(frame, str):
             if os.path.exists(frame):
                 shutil.copy2(frame, frame_path)
+            else:
+                print(f'[Recorder] 警告: 图像文件不存在: {frame}')
+                return None
         else:
+            cv2 = _get_cv2()
+            if cv2 is None:
+                print(f'[Recorder] 警告: 无法保存相机帧（OpenCV未安装）')
+                return None
             cv2.imwrite(frame_path, frame)
         
         record = CameraFrame(
@@ -262,10 +289,15 @@ class TaskRecorder:
                 return
     
     def end_task(self, status: str = TaskStatus.SUCCESS.value, error_summary: Optional[str] = None):
-        '''结束任务'''
+        '''结束任务（防重复调用）'''
+        if self._task_ended:
+            print(f'[Recorder] 任务已结束，跳过重复调用')
+            return
+        
         if not self._current_task:
             return
         
+        self._task_ended = True
         self._current_task.end_time = time.time()
         self._current_task.status = status
         self._current_task.error_summary = error_summary

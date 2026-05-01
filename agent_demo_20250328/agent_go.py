@@ -103,6 +103,7 @@ def agent_play():
     task_id = recorder.start_task()
     task_status = TaskStatus.SUCCESS.value
     error_summary = None
+    order = None
     
     try:
         print('机械臂归零')
@@ -110,7 +111,6 @@ def agent_play():
         
         start_record_ok = input('是否开启录音，输入数字录音指定时长，按k打字输入，按c输入默认指令\n')
         
-        order = None
         if str.isnumeric(start_record_ok):
             DURATION = int(start_record_ok)
             print(f'开始 {DURATION} 秒录音')
@@ -137,8 +137,9 @@ def agent_play():
             )
         else:
             print('无指令，退出')
-            recorder.end_task(status=TaskStatus.CANCELLED.value, error_summary='用户取消')
-            raise NameError('无指令，退出')
+            task_status = TaskStatus.CANCELLED.value
+            error_summary = '用户取消'
+            return
         
         message.append({"role": "user", "content": order})
         agent_plan_output = eval(agent_plan(message))
@@ -152,34 +153,27 @@ def agent_play():
             agent_response=agent_plan_output.get('response', '')
         )
         
-        plan_ok = 'c'
-        if plan_ok == 'c':
-            response = agent_plan_output['response']
-            print('开始语音合成')
-            tts(response)
-            play_wav('temp/tts.wav')
-            output_other = ''
-            
-            for each in agent_plan_output['function']:
-                print('开始执行动作', each)
-                func_name = each.split('(')[0] if '(' in each else each
-                
-                try:
-                    ret = execute_with_recording(func_name, each)
-                    if ret != None:
-                        output_other = ret
-                except Exception as e:
-                    task_status = TaskStatus.FAILED.value
-                    error_summary = f'执行动作失败: {each}, 错误: {str(e)}'
-                    raise
+        response = agent_plan_output['response']
+        print('开始语音合成')
+        tts(response)
+        play_wav('temp/tts.wav')
+        output_other = ''
         
-        elif plan_ok == 'q':
-            recorder.end_task(status=TaskStatus.CANCELLED.value, error_summary='用户按q退出')
-            raise NameError('按q退出')
+        for each in agent_plan_output['function']:
+            print('开始执行动作', each)
+            func_name = each.split('(')[0] if '(' in each else each
+            
+            ret = execute_with_recording(func_name, each)
+            if ret != None:
+                output_other = ret
         
         agent_plan_output['response'] += '.' + output_other
         message.append({"role": "assistant", "content": str(agent_plan_output)})
         
+    except KeyboardInterrupt:
+        task_status = TaskStatus.CANCELLED.value
+        error_summary = '用户键盘中断'
+        raise
     except Exception as e:
         if task_status != TaskStatus.CANCELLED.value:
             task_status = TaskStatus.FAILED.value
@@ -189,14 +183,24 @@ def agent_play():
         recorder.end_task(status=task_status, error_summary=error_summary)
         print(f'\n[Recorder] 任务 {task_id} 记录完成，状态: {task_status}')
 
-if __name__ == '__main__':
+def main():
+    '''主循环'''
     while True:
         try:
             agent_play()
         except KeyboardInterrupt:
-            print('\n用户中断')
-            recorder.end_task(status=TaskStatus.CANCELLED.value, error_summary='用户键盘中断')
+            print('\n用户中断程序')
             break
+        except NameError as e:
+            if '无指令' in str(e) or '按q退出' in str(e):
+                print(f'任务已取消: {e}')
+                continue
+            else:
+                print(f'\n任务执行出错: {e}')
+                continue
         except Exception as e:
             print(f'\n任务执行出错: {e}')
             continue
+
+if __name__ == '__main__':
+    main()

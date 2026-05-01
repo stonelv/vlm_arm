@@ -19,7 +19,8 @@ except ImportError:
     MATPLOTLIB_AVAILABLE = False
     print('[Visualizer] matplotlib未安装，部分可视化功能不可用')
 
-RECORD_DIR = 'task_records'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RECORD_DIR = os.path.join(BASE_DIR, 'task_records')
 
 def load_task_record(task_dir: str) -> Dict:
     '''加载任务记录'''
