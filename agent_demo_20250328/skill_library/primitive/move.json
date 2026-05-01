@@ -1,0 +1,174 @@
+{
+  "name": "move",
+  "description": "移动技能: 在安全高度水平移动到目标位置",
+  "skill_type": "primitive",
+  "parameters": [
+    {
+      "name": "start_xy",
+      "description": "起始XY坐标",
+      "param_type": "list",
+      "default_value": [
+        200,
+        0
+      ],
+      "min_value": null,
+      "max_value": null
+    },
+    {
+      "name": "target_xy",
+      "description": "目标XY坐标",
+      "param_type": "list",
+      "default_value": [
+        100,
+        180
+      ],
+      "min_value": null,
+      "max_value": null
+    },
+    {
+      "name": "height",
+      "description": "移动高度",
+      "param_type": "float",
+      "default_value": 200.0,
+      "min_value": null,
+      "max_value": null
+    },
+    {
+      "name": "speed",
+      "description": "速度",
+      "param_type": "float",
+      "default_value": 1.0,
+      "min_value": null,
+      "max_value": null
+    }
+  ],
+  "trajectory": [
+    {
+      "timestamp": 0.0,
+      "angles": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "coords": [
+        200,
+        0,
+        200,
+        0,
+        180,
+        90
+      ],
+      "event": null
+    },
+    {
+      "timestamp": 1.0,
+      "angles": [
+        30.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "coords": [
+        150,
+        100,
+        200,
+        0,
+        180,
+        90
+      ],
+      "event": null
+    },
+    {
+      "timestamp": 2.0,
+      "angles": [
+        60.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "coords": [
+        100,
+        180,
+        200,
+        0,
+        180,
+        90
+      ],
+      "event": null
+    }
+  ],
+  "smoothed_trajectory": [
+    {
+      "timestamp": 0.0,
+      "angles": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "coords": [
+        200,
+        0,
+        200,
+        0,
+        180,
+        90
+      ],
+      "event": null
+    },
+    {
+      "timestamp": 1.0,
+      "angles": [
+        30.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "coords": [
+        150,
+        100,
+        200,
+        0,
+        180,
+        90
+      ],
+      "event": null
+    },
+    {
+      "timestamp": 2.0,
+      "angles": [
+        60.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "coords": [
+        100,
+        180,
+        200,
+        0,
+        180,
+        90
+      ],
+      "event": null
+    }
+  ],
+  "normalized_duration": 2.0,
+  "metadata": {
+    "demo": true
+  },
+  "created_at": 1777621112.6486132
+}
