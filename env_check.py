@@ -563,7 +563,7 @@ APPBUILDER_TOKEN = "your_appbuilder_token_here"
         
         return self.template_path
 
-    def run_all_checks(self):
+    def run_all_checks(self, report_path=None):
         print("\n" + "#"*60)
         print("# 环境自检与配置向导")
         print("#"*60)
@@ -577,7 +577,7 @@ APPBUILDER_TOKEN = "your_appbuilder_token_here"
         self.check_config()
         
         self.print_summary()
-        self.save_report()
+        self.save_report(report_path)
         
         return self.report['summary']['failed'] == 0
 
@@ -607,6 +607,10 @@ APPBUILDER_TOKEN = "your_appbuilder_token_here"
         if filename is None:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = self.project_root / f'env_report_{timestamp}.json'
+        else:
+            filename = Path(filename)
+        
+        filename.parent.mkdir(parents=True, exist_ok=True)
         
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(self.report, f, ensure_ascii=False, indent=2)
@@ -644,7 +648,7 @@ def main():
         print("\n运行 python env_check.py 进行完整环境检查")
         return
     
-    success = checker.run_all_checks()
+    success = checker.run_all_checks(report_path=args.report)
     
     sys.exit(0 if success else 1)
 
