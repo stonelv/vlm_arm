@@ -1,4 +1,4 @@
-let currentImagePath = null;
+let currentFilename = null;
 let currentTaskId = null;
 let currentExecutionPlan = null;
 let chatMessages = [];
@@ -27,7 +27,7 @@ function handleImageUpload(event) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            currentImagePath = data.image_path;
+            currentFilename = data.filename;
             
             preview.innerHTML = `<img src="${data.image_url}" alt="上传的图像" class="img-fluid rounded">`;
             
@@ -45,7 +45,7 @@ function handleImageUpload(event) {
 
 function updateAnalyzeButton() {
     const btn = document.getElementById('analyzeBtn');
-    const hasImage = currentImagePath !== null;
+    const hasImage = currentFilename !== null;
     const hasInstruction = document.getElementById('taskInput').value.trim().length > 0;
     
     btn.disabled = !(hasImage && hasInstruction);
@@ -54,7 +54,7 @@ function updateAnalyzeButton() {
 function analyzeTask() {
     const instruction = document.getElementById('taskInput').value.trim();
     
-    if (!currentImagePath || !instruction) {
+    if (!currentFilename || !instruction) {
         showAlert('请先上传图像并输入指令', 'warning');
         return;
     }
@@ -72,7 +72,7 @@ function analyzeTask() {
         },
         body: JSON.stringify({
             instruction: instruction,
-            image_path: currentImagePath
+            filename: currentFilename
         })
     })
     .then(response => response.json())
