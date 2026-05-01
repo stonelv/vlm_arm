@@ -10,17 +10,37 @@
 import sys
 import os
 import json
+import re
 import argparse
 import platform
-import subprocess
+import shutil
 from pathlib import Path
 from datetime import datetime
 
 
+MIN_PYTHON_VERSION = (3, 12)
+REQUIRED_KEYS = ['Qwen_KEY', 'YI_KEY', 'QIANFAN_ACCESS_KEY', 
+                  'QIANFAN_SECRET_KEY', 'APPBUILDER_TOKEN']
+PLACEHOLDER_PATTERNS = [
+    r'your_.*_here',
+    r'XX+',
+    r'xx+',
+    r'\*{3,}',
+]
+
+
 class EnvironmentChecker:
-    def __init__(self, project_root=None):
+    def __init__(self, project_root=None, config_path=None):
         self.project_root = Path(project_root) if project_root else Path(__file__).parent
         self.agent_dir = self.project_root / 'agent_demo_20250328'
+        
+        if config_path:
+            self.config_path = Path(config_path)
+        else:
+            self.config_path = self.agent_dir / 'API_KEY.py'
+        
+        self.template_path = self.project_root / 'API_KEY.example.py'
+        
         self.report = {
             'timestamp': datetime.now().isoformat(),
             'python': {},
@@ -49,7 +69,7 @@ class EnvironmentChecker:
                 self._issues.append(f"[ERROR] {name}: {message}")
         return passed
 
-    def check_python_version(self, min_version=(3, 10)):
+    def check_python_version(self):
         print("\n" + "="*60)
         print("检查 Python 版本...")
         print("="*60)
@@ -60,20 +80,51 @@ class EnvironmentChecker:
         self.report['python']['executable'] = sys.executable
         self.report['python']['platform'] = platform.system()
         
-        is_valid = version >= min_version
+        is_valid = version >= MIN_PYTHON_VERSION
+        min_ver_str = f"{MIN_PYTHON_VERSION[0]}.{MIN_PYTHON_VERSION[1]}"
+        
         self._check(
             'python_version',
             is_valid,
-            f"需要 Python >= {min_version[0]}.{min_version[1]}，当前版本 {version_str}"
+            f"需要 Python >= {min_ver_str}，当前版本 {version_str}"
         )
         
         if is_valid:
             print(f"✓ Python 版本: {version_str}")
         else:
-            print(f"✗ Python 版本: {version_str} (需要 >= {min_version[0]}.{min_version[1]})")
+            print(f"✗ Python 版本: {version_str} (需要 >= {min_ver_str})")
         
         self.report['python']['valid'] = is_valid
         return is_valid
+
+    def _get_package_distribution(self, pkg_name):
+        try:
+            from importlib.metadata import distribution, PackageNotFoundError
+            try:
+                dist = distribution(pkg_name)
+                return {
+                    'status': 'installed',
+                    'version': dist.version,
+                    'name': dist.metadata.get('Name', pkg_name)
+                }
+            except PackageNotFoundError:
+                pass
+        except ImportError:
+            try:
+                import pkg_resources
+                try:
+                    dist = pkg_resources.get_distribution(pkg_name)
+                    return {
+                        'status': 'installed',
+                        'version': dist.version,
+                        'name': dist.project_name
+                    }
+                except pkg_resources.DistributionNotFound:
+                    pass
+            except ImportError:
+                pass
+        
+        return {'status': 'missing', 'version': None}
 
     def check_dependencies(self):
         print("\n" + "="*60)
@@ -89,65 +140,47 @@ class EnvironmentChecker:
             print(f"✗ 找不到 requirements.txt: {requirements_path}")
             return False
         
-        all_passed = True
+        package_names = []
         with open(requirements_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
+            for line in f.readlines():
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                pkg_name = line.split('==')[0].split('#')[0].strip()
+                if pkg_name:
+                    package_names.append(pkg_name)
         
-        import importlib
-        import pkg_resources
+        installed_packages = []
+        missing_packages = []
         
-        package_map = {
-            'opencv-python': 'cv2',
-            'Pillow': 'PIL',
-            'pyaudio': 'pyaudio',
-            'sounddevice': 'sounddevice',
-            'pymycobot': 'pymycobot',
-            'appbuilder-sdk': 'appbuilder',
-            'qianfan': 'qianfan',
-            'open3d': 'open3d',
-            'plyfile': 'plyfile',
-            'pybind11': 'pybind11',
-            'numpy': 'numpy',
-            'redis': 'redis',
-            'openai': 'openai',
-        }
-        
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
+        for pkg_name in package_names:
+            result = self._get_package_distribution(pkg_name)
             
-            pkg_name = line.split('==')[0].split('#')[0].strip()
-            if not pkg_name:
-                continue
+            self.report['dependencies']['packages'][pkg_name] = result
             
-            import_name = package_map.get(pkg_name, pkg_name.replace('-', '_'))
-            
-            try:
-                if import_name == 'cv2':
-                    import cv2
-                    version = cv2.__version__ if hasattr(cv2, '__version__') else 'installed'
-                else:
-                    module = importlib.import_module(import_name)
-                    version = module.__version__ if hasattr(module, '__version__') else 'installed'
-                
-                self.report['dependencies']['packages'][pkg_name] = {
-                    'status': 'installed',
-                    'version': version
-                }
-                print(f"✓ {pkg_name}: {version}")
-                
-            except ImportError as e:
-                self.report['dependencies']['packages'][pkg_name] = {
-                    'status': 'missing',
-                    'error': str(e)
-                }
+            if result['status'] == 'installed':
+                installed_packages.append(pkg_name)
+                print(f"✓ {pkg_name}: {result['version']}")
+            else:
+                missing_packages.append(pkg_name)
                 print(f"✗ {pkg_name}: 未安装")
-                self._check(f'dep_{pkg_name}', False, f"依赖包 {pkg_name} 未安装")
-                all_passed = False
         
-        self.report['dependencies']['valid'] = all_passed
-        return all_passed
+        self.report['dependencies']['installed_count'] = len(installed_packages)
+        self.report['dependencies']['missing_count'] = len(missing_packages)
+        self.report['dependencies']['missing_list'] = missing_packages
+        
+        if missing_packages:
+            self._check('dependencies', False, f"缺少 {len(missing_packages)} 个依赖包")
+            print(f"\n⚠  缺失的依赖包列表:")
+            for pkg in missing_packages:
+                print(f"   - {pkg}")
+            print(f"\n安装命令: pip install {' '.join(missing_packages)}")
+        else:
+            self._check('dependencies', True)
+            print(f"\n✓ 所有 {len(installed_packages)} 个依赖包已安装")
+        
+        self.report['dependencies']['valid'] = len(missing_packages) == 0
+        return len(missing_packages) == 0
 
     def check_camera(self):
         print("\n" + "="*60)
@@ -158,7 +191,6 @@ class EnvironmentChecker:
         
         try:
             import cv2
-            import numpy as np
             
             cap = cv2.VideoCapture(0)
             
@@ -260,7 +292,6 @@ class EnvironmentChecker:
         print("="*60)
         
         self.report['hardware']['speaker'] = {}
-        system = platform.system()
         
         try:
             import pyaudio
@@ -281,7 +312,7 @@ class EnvironmentChecker:
             p.terminate()
             
             self.report['hardware']['speaker']['devices'] = devices
-            self.report['hardware']['speaker']['platform'] = system
+            self.report['hardware']['speaker']['platform'] = platform.system()
             
             if devices:
                 self.report['hardware']['speaker']['status'] = 'available'
@@ -371,46 +402,83 @@ class EnvironmentChecker:
             print("✗ pymycobot 未安装")
             return False
 
+    def _is_placeholder(self, value):
+        if not isinstance(value, str):
+            return False
+        value = value.strip()
+        for pattern in PLACEHOLDER_PATTERNS:
+            if re.search(pattern, value, re.IGNORECASE):
+                return True
+        return False
+
+    def _extract_key_values(self, content):
+        key_values = {}
+        
+        for key in REQUIRED_KEYS:
+            pattern = rf'^{key}\s*=\s*["\']([^"\']*)["\']'
+            match = re.search(pattern, content, re.MULTILINE)
+            if match:
+                key_values[key] = match.group(1)
+            else:
+                key_values[key] = None
+        
+        return key_values
+
     def check_config(self):
         print("\n" + "="*60)
         print("检查配置文件...")
         print("="*60)
         
-        self.report['config'] = {}
-        api_key_path = self.agent_dir / 'API_KEY.py'
+        self.report['config'] = {
+            'template_path': str(self.template_path),
+            'target_path': str(self.config_path)
+        }
         
-        self.report['config']['api_key_path'] = str(api_key_path)
+        template_exists = self.template_path.exists()
+        config_exists = self.config_path.exists()
         
-        if not api_key_path.exists():
+        self.report['config']['template_exists'] = template_exists
+        self.report['config']['config_exists'] = config_exists
+        
+        if not template_exists:
+            print(f"⚠  模板文件不存在: {self.template_path}")
+            print(f"  请运行 python env_check.py --fix 生成配置模板")
+        
+        if not config_exists:
             self.report['config']['status'] = 'missing'
-            self._check('config', False, f"配置文件不存在: {api_key_path}")
-            print(f"✗ 配置文件不存在: {api_key_path}")
+            self._check('config', False, f"配置文件不存在: {self.config_path}")
+            print(f"✗ 配置文件不存在: {self.config_path}")
+            print(f"  请运行 python env_check.py --fix 创建配置文件")
             return False
         
         try:
-            with open(api_key_path, 'r', encoding='utf-8') as f:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            keys_to_check = ['Qwen_KEY', 'YI_KEY', 'QIANFAN_ACCESS_KEY', 
-                           'QIANFAN_SECRET_KEY', 'APPBUILDER_TOKEN']
+            key_values = self._extract_key_values(content)
             
             found_keys = {}
             placeholder_keys = []
+            configured_keys = []
             
-            for key in keys_to_check:
-                if key in content:
+            for key, value in key_values.items():
+                if value is not None:
                     found_keys[key] = True
-                    if 'XXXXX' in content or 'xxxx' in content:
+                    if self._is_placeholder(value):
                         placeholder_keys.append(key)
+                    else:
+                        configured_keys.append(key)
                 else:
                     found_keys[key] = False
             
             self.report['config']['keys_found'] = found_keys
             self.report['config']['placeholder_keys'] = placeholder_keys
+            self.report['config']['configured_keys'] = configured_keys
             self.report['config']['status'] = 'exists'
             
-            print(f"✓ 配置文件存在: {api_key_path}")
+            print(f"✓ 配置文件存在: {self.config_path}")
             print(f"  检测到的配置项:")
+            
             for key, found in found_keys.items():
                 if found:
                     if key in placeholder_keys:
@@ -421,16 +489,21 @@ class EnvironmentChecker:
                     print(f"    ✗ {key}: 缺失")
             
             all_found = all(found_keys.values())
-            if all_found:
-                if placeholder_keys:
-                    self._check('config', True)
-                else:
-                    self._check('config', True)
+            any_placeholder = len(placeholder_keys) > 0
+            
+            if all_found and not any_placeholder:
+                self._check('config', True)
+                print(f"\n✓ 所有配置项已正确配置")
+            elif all_found and any_placeholder:
+                self._check('config', False, f"仍有 {len(placeholder_keys)} 个配置项使用占位符")
+                print(f"\n⚠  请将占位符替换为真实的 API 密钥")
+                for key in placeholder_keys:
+                    print(f"   - {key}")
             else:
                 self._check('config', False, "部分配置项缺失")
             
-            self.report['config']['valid'] = all_found
-            return all_found
+            self.report['config']['valid'] = all_found and not any_placeholder
+            return self.report['config']['valid']
             
         except Exception as e:
             self.report['config']['status'] = 'error'
@@ -452,6 +525,7 @@ class EnvironmentChecker:
 # 1. 从各开放平台获取真实的 API Key
 # 2. 将下方的占位符替换为真实密钥
 # 3. 不要将包含真实密钥的文件提交到版本控制系统
+# 4. 此文件中的默认占位符包括: your_*_here, XXX, *** 等
 
 # 通义千问QwenVL系列
 # https://bailian.console.aliyun.com/#/model-market
@@ -472,24 +546,22 @@ QIANFAN_SECRET_KEY = "your_qianfan_secret_key_here"
 APPBUILDER_TOKEN = "your_appbuilder_token_here"
 '''
         
-        config_path = self.agent_dir / 'API_KEY.py'
-        template_path = self.project_root / 'API_KEY.example.py'
-        
-        with open(template_path, 'w', encoding='utf-8') as f:
+        self.template_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.template_path, 'w', encoding='utf-8') as f:
             f.write(template_content)
         
-        print(f"✓ 配置模板已生成: {template_path}")
+        print(f"✓ 配置模板已生成: {self.template_path}")
         
-        if not config_path.exists():
-            import shutil
-            shutil.copy(template_path, config_path)
-            print(f"✓ 已创建配置文件: {config_path}")
+        if not self.config_path.exists():
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(self.template_path, self.config_path)
+            print(f"✓ 已创建配置文件: {self.config_path}")
             print("  请编辑该文件，填入您的真实 API 密钥")
         else:
-            print(f"  配置文件已存在: {config_path}")
+            print(f"\n  配置文件已存在: {self.config_path}")
             print("  如需重置配置，请删除该文件后重新运行 --fix")
         
-        return template_path
+        return self.template_path
 
     def run_all_checks(self):
         print("\n" + "#"*60)
@@ -547,20 +619,25 @@ def main():
     parser = argparse.ArgumentParser(
         description='环境自检与配置向导',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog='''
+        epilog=f'''
+版本要求: Python >= {MIN_PYTHON_VERSION[0]}.{MIN_PYTHON_VERSION[1]}
+
 示例:
-  python env_check.py          # 运行所有检查
-  python env_check.py --fix    # 生成配置模板
+  python env_check.py                    # 运行所有检查
+  python env_check.py --fix              # 生成配置模板
+  python env_check.py --config path/to/API_KEY.py  # 指定配置文件路径
         '''
     )
     parser.add_argument('--fix', action='store_true', 
                        help='自动生成/更新配置模板')
+    parser.add_argument('--config', type=str, default=None,
+                       help='指定配置文件路径 (默认: agent_demo_20250328/API_KEY.py)')
     parser.add_argument('--report', type=str, default=None,
                        help='指定报告输出路径 (JSON格式)')
     
     args = parser.parse_args()
     
-    checker = EnvironmentChecker()
+    checker = EnvironmentChecker(config_path=args.config)
     
     if args.fix:
         checker.generate_config_template()
