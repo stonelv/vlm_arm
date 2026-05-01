@@ -13,6 +13,7 @@ font = ImageFont.truetype('asset/SimHei.ttf', 26)
 
 from API_KEY import *
 from utils_tts import *
+from utils_recorder import recorder
 OUTPUT_VLM = ''
 # 系统提示词
 SYSTEM_PROMPT_CATCH = '''
@@ -90,14 +91,27 @@ def yi_vision_api(PROMPT='帮我把红色方块放在钢笔上', img_path='temp/
     )
     
     # 解析大模型返回结果
+    raw_response = completion.choices[0].message.content.strip()
     if vlm_option == 0: #定位任务
-        result = eval(completion.choices[0].message.content.strip())
+        result = eval(raw_response)
+        task_type = 'object_localization'
     elif vlm_option == 1: #视觉问答任务
-        result = completion.choices[0].message.content.strip()
+        result = raw_response
+        task_type = 'visual_qa'
         print(result)
         tts(result)  # 语音合成，导出wav音频文件
         play_wav('temp/tts.wav')  # 播放语音合成音频文件S
     print('    大模型调用成功！')
+    
+    recorder.record_vlm_result(
+        task_type=task_type,
+        prompt=PROMPT,
+        raw_response=raw_response,
+        parsed_result=result if isinstance(result, dict) else {'answer': result},
+        image_path=img_path,
+        viz_path=None,
+        model_used='yi-vision'
+    )
     
     return result
 
@@ -143,14 +157,27 @@ def QwenVL_api(PROMPT='帮我把红色方块放在钢笔上', img_path='temp/vl_
     )
 
     # 解析大模型返回结果
+    raw_response = completion.choices[0].message.content.strip()
     if vlm_option == 0: #定位任务
-        result = eval(completion.choices[0].message.content.strip())
+        result = eval(raw_response)
+        task_type = 'object_localization'
     elif vlm_option == 1: #视觉问答任务
-        result = completion.choices[0].message.content.strip()
+        result = raw_response
+        task_type = 'visual_qa'
         print(result)
         tts(result)  # 语音合成，导出wav音频文件
         play_wav('temp/tts.wav')  # 播放语音合成音频文件S
     print('    大模型调用成功！')
+    
+    recorder.record_vlm_result(
+        task_type=task_type,
+        prompt=PROMPT,
+        raw_response=raw_response,
+        parsed_result=result if isinstance(result, dict) else {'answer': result},
+        image_path=img_path,
+        viz_path=None,
+        model_used='qwen-vl-max-2024-11-19'
+    )
 
     return result
 
@@ -213,6 +240,15 @@ def post_processing_viz(result, img_path, check=False):
 
     formatted_time = time.strftime("%Y%m%d%H%M", time.localtime())
     cv2.imwrite('visualizations/{}.jpg'.format(formatted_time), img_bgr)
+
+    recorder.record_camera_frame(
+        frame='temp/vl_now_viz.jpg',
+        description=f'VLM可视化结果: 起点{START_NAME}({START_X_CENTER},{START_Y_CENTER}) -> 终点{END_NAME}({END_X_CENTER},{END_Y_CENTER})',
+        camera_coords={
+            'start': {'name': START_NAME, 'x': START_X_CENTER, 'y': START_Y_CENTER},
+            'end': {'name': END_NAME, 'x': END_X_CENTER, 'y': END_Y_CENTER}
+        }
+    )
 
     # 在屏幕上展示可视化效果图
     cv2.imshow('zihao_vlm', img_bgr) 
