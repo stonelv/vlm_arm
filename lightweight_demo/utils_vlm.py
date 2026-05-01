@@ -17,9 +17,9 @@ class VLMEngine:
                 base_url="https://api.lingyiwanwu.com/v1"
             )
         
-        if config.Qwen_KEY:
+        if config.QWEN_KEY:
             self.qwen_client = OpenAI(
-                api_key=config.Qwen_KEY,
+                api_key=config.QWEN_KEY,
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
             )
     

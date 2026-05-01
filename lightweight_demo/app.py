@@ -18,6 +18,27 @@ vlm_engine = None
 agent_planner = None
 task_recorder = TaskRecorder()
 
+def is_safe_filename(filename):
+    if not filename or not isinstance(filename, str):
+        return False
+    if '..' in filename or filename.startswith('/') or filename.startswith('\\'):
+        return False
+    if os.path.isabs(filename):
+        return False
+    return True
+
+def get_safe_filepath(filename, subfolder=None):
+    if not is_safe_filename(filename):
+        return None
+    base_folder = app.config['UPLOAD_FOLDER']
+    if subfolder:
+        base_folder = os.path.join(base_folder, subfolder)
+    filepath = os.path.abspath(os.path.join(base_folder, filename))
+    base_abs = os.path.abspath(app.config['UPLOAD_FOLDER'])
+    if not filepath.startswith(base_abs + os.sep) and filepath != base_abs:
+        return None
+    return filepath
+
 def init_engines():
     global vlm_engine, agent_planner
     try:
@@ -56,7 +77,7 @@ def upload_image():
         
         return jsonify({
             'success': True,
-            'image_path': filepath,
+            'filename': filename,
             'image_info': image_info,
             'image_url': url_for('serve_image', filename=filename)
         })
@@ -65,25 +86,29 @@ def upload_image():
 
 @app.route('/uploads/<filename>')
 def serve_image(filename):
-    return send_file(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+    filepath = get_safe_filepath(filename)
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({'success': False, 'error': 'File not found'}), 404
+    return send_file(filepath)
 
 @app.route('/analyze', methods=['POST'])
 def analyze_task():
     data = request.json
     user_instruction = data.get('instruction', '')
-    image_path = data.get('image_path', '')
+    filename = data.get('filename', '')
     
-    if not user_instruction or not image_path:
+    if not user_instruction or not filename:
         return jsonify({'success': False, 'error': 'Missing instruction or image'})
     
-    if not os.path.exists(image_path):
+    filepath = get_safe_filepath(filename)
+    if not filepath or not os.path.exists(filepath):
         return jsonify({'success': False, 'error': 'Image file not found'})
     
-    task_id = task_recorder.create_task(user_instruction, image_path)
+    task_id = task_recorder.create_task(user_instruction, filepath)
     task_recorder.update_status(TaskStatus.PLANNING)
     
     try:
-        detections_result = vlm_engine.detect_objects(image_path) if vlm_engine else {
+        detections_result = vlm_engine.detect_objects(filepath) if vlm_engine else {
             'success': True,
             'result': {
                 'detections': [
@@ -115,7 +140,7 @@ def analyze_task():
                 'error': f"Object detection failed: {detections_result.get('error')}"
             })
         
-        task_analysis = vlm_engine.analyze_task(image_path, user_instruction) if vlm_engine else {
+        task_analysis = vlm_engine.analyze_task(filepath, user_instruction) if vlm_engine else {
             'success': True,
             'result': {
                 'task_type': 'pick_place',
@@ -145,7 +170,7 @@ def analyze_task():
                 'error': f"Task analysis failed: {task_analysis.get('error')}"
             })
         
-        image_info = image_processor.get_image_info(image_path)
+        image_info = image_processor.get_image_info(filepath)
         execution_plan = agent_planner.generate_execution_plan(task_analysis, image_info)
         
         validation = agent_planner.validate_plan(execution_plan)
@@ -157,7 +182,7 @@ def analyze_task():
         viz_image_path = None
         if detections and len(detections) > 0:
             try:
-                viz_image_path = image_processor.draw_detections(image_path, detections)
+                viz_image_path = image_processor.draw_detections(filepath, detections)
             except:
                 pass
         
@@ -186,7 +211,10 @@ def analyze_task():
 
 @app.route('/uploads/processed/<filename>')
 def serve_processed_image(filename):
-    return send_file(os.path.join(app.config['UPLOAD_FOLDER'], 'processed', filename))
+    filepath = get_safe_filepath(filename, subfolder='processed')
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({'success': False, 'error': 'File not found'}), 404
+    return send_file(filepath)
 
 @app.route('/execute', methods=['POST'])
 def execute_plan():
@@ -275,8 +303,20 @@ def export_task():
 
 @app.route('/records/<filename>')
 def download_export(filename):
+    if not is_safe_filename(filename):
+        return jsonify({'success': False, 'error': 'Invalid filename'}), 400
+    
+    records_dir = os.path.abspath('records')
+    filepath = os.path.abspath(os.path.join('records', filename))
+    
+    if not filepath.startswith(records_dir + os.sep):
+        return jsonify({'success': False, 'error': 'Invalid path'}), 403
+    
+    if not os.path.exists(filepath):
+        return jsonify({'success': False, 'error': 'File not found'}), 404
+    
     return send_file(
-        os.path.join('records', filename),
+        filepath,
         as_attachment=True,
         download_name=filename
     )
@@ -302,10 +342,14 @@ def get_task_history():
 def visual_qa():
     data = request.json
     question = data.get('question', '')
-    image_path = data.get('image_path', '')
+    filename = data.get('filename', '')
     
-    if not question or not image_path:
+    if not question or not filename:
         return jsonify({'success': False, 'error': 'Missing question or image'})
+    
+    filepath = get_safe_filepath(filename)
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({'success': False, 'error': 'Image file not found'})
     
     if not vlm_engine:
         return jsonify({
@@ -315,7 +359,7 @@ def visual_qa():
         })
     
     try:
-        result = vlm_engine.visual_qa(image_path, question)
+        result = vlm_engine.visual_qa(filepath, question)
         if result.get('success'):
             return jsonify({
                 'success': True,
@@ -328,11 +372,4 @@ def visual_qa():
         return jsonify({'success': False, 'error': str(e)})
 
 if __name__ == '__main__':
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'processed'), exist_ok=True)
-    os.makedirs('records', exist_ok=True)
-    os.makedirs('templates', exist_ok=True)
-    os.makedirs(os.path.join('static', 'css'), exist_ok=True)
-    os.makedirs(os.path.join('static', 'js'), exist_ok=True)
-    
     app.run(debug=True, host='0.0.0.0', port=5000)
