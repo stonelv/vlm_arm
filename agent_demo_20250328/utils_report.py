@@ -9,7 +9,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 import glob
 
-RECORD_DIR = 'task_records'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RECORD_DIR = os.path.join(BASE_DIR, 'task_records')
 
 def format_timestamp(timestamp: float) -> str:
     '''格式化时间戳'''
@@ -284,7 +285,7 @@ def generate_markdown_report(task_dir: str, output_path: Optional[str] = None) -
     
     print(f'[Report] 报告已生成: {output_path}')
     
-    return report_content
+    return output_path
 
 def list_all_tasks() -> list:
     '''列出所有任务'''

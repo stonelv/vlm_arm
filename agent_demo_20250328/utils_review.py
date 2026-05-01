@@ -6,7 +6,8 @@ import os
 import sys
 from typing import Optional, Dict, Any
 
-RECORD_DIR = 'task_records'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+RECORD_DIR = os.path.join(BASE_DIR, 'task_records')
 
 def review_task(task_dir: str, generate_all: bool = True, 
                 show_plots: bool = False) -> Dict[str, Any]:
