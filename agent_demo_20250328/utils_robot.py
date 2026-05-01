@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 import time
 from utils_pump import *
+from utils_recorder import recorder
 
 # 连接机械臂
 mc = MyCobot(PI_PORT, PI_BAUD)
@@ -110,6 +111,12 @@ def top_view_shot(check=False):
     # 保存图像
     print('    保存至temp/vl_now.jpg')
     cv2.imwrite('temp/vl_now.jpg', img_bgr)
+
+    recorder.record_camera_frame(
+        frame='temp/vl_now.jpg',
+        description='俯视视角相机帧',
+        camera_coords=None
+    )
 
     # 屏幕上展示图像
     cv2.destroyAllWindows()   # 关闭所有opencv窗口
