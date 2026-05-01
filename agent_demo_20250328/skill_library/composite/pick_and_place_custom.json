@@ -1,0 +1,42 @@
+{
+  "name": "pick_and_place_custom",
+  "description": "自定义的拾取-移动-放置复合技能",
+  "skill_type": "composite",
+  "parameters": [
+    {
+      "name": "global_speed",
+      "description": "全局速度比例",
+      "param_type": "float",
+      "default_value": 1.0,
+      "min_value": null,
+      "max_value": null
+    }
+  ],
+  "trajectory": [],
+  "smoothed_trajectory": [],
+  "normalized_duration": 0.0,
+  "metadata": {},
+  "created_at": 1777621112.650482,
+  "sub_skills": [
+    {
+      "skill_name": "pick_up",
+      "params": {
+        "speed": 0.8,
+        "height_offset": 0.0
+      }
+    },
+    {
+      "skill_name": "move",
+      "params": {
+        "speed": 1.0
+      }
+    },
+    {
+      "skill_name": "place_down",
+      "params": {
+        "speed": 0.8,
+        "height_offset": 0.0
+      }
+    }
+  ]
+}
