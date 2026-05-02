@@ -1,28 +1,38 @@
 # utils_robot.py
 # 同济子豪兄 2024-5-22
 # 启动并连接机械臂，导入各种工具包
+# 支持真机/仿真模式切换
 
 print('导入机械臂连接模块')
 
-from pymycobot.mycobot import MyCobot
-from pymycobot import PI_PORT, PI_BAUD
+from config import is_simulation_mode, PI_PORT, PI_BAUD
 import cv2
 import numpy as np
 import time
-from utils_pump import *
+
+# 根据模式选择机器人接口
+if is_simulation_mode():
+    print('[模式检测] 检测到仿真模式，使用模拟机器人接口')
+    from simulated_robot import SimulatedRobot as MyCobot
+    from simulated_robot import GPIO
+else:
+    print('[模式检测] 检测到真机模式，使用真实机器人接口')
+    from pymycobot.mycobot import MyCobot
+    from pymycobot import PI_PORT, PI_BAUD
+    import RPi.GPIO as GPIO
 
 # 连接机械臂
 mc = MyCobot(PI_PORT, PI_BAUD)
 # 设置运动模式为插补
 mc.set_fresh_mode(0)
 
-import RPi.GPIO as GPIO
-# 初始化GPIO
-GPIO.setwarnings(False)   # 不打印 warning 信息
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(20, GPIO.OUT)
-GPIO.setup(21, GPIO.OUT)
-GPIO.output(20, 1)        # 关闭吸泵电磁阀
+# 初始化GPIO（仅在仿真模式下需要，真机模式下在文件开头已导入RPi.GPIO）
+if is_simulation_mode():
+    GPIO.setwarnings(False)   # 不打印 warning 信息
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(20, GPIO.OUT)
+    GPIO.setup(21, GPIO.OUT)
+    GPIO.output(20, 1)        # 关闭吸泵电磁阀
 
 def back_zero():
     '''
@@ -191,6 +201,7 @@ def pump_move(mc, XY_START=[230,-50], HEIGHT_START=90, XY_END=[100,220], HEIGHT_
     time.sleep(4)
 
     # 开启吸泵
+    from utils_pump import pump_on
     pump_on()
     
     # 吸泵向下吸取物体
@@ -214,9 +225,47 @@ def pump_move(mc, XY_START=[230,-50], HEIGHT_START=90, XY_END=[100,220], HEIGHT_
     time.sleep(3)
 
     # 关闭吸泵
+    from utils_pump import pump_off
     pump_off()
 
     # 机械臂归零
     print('    机械臂归零')
     mc.send_angles([0, 0, 0, 0, 0, 0], 40)
     time.sleep(3)
+
+
+# 仿真模式专用功能
+def get_robot_instance():
+    '''
+    获取当前机器人实例
+    仿真模式下可用于访问额外功能如轨迹记录
+    '''
+    return mc
+
+def save_trajectory(file_path=None):
+    '''
+    保存轨迹（仅仿真模式有效）
+    '''
+    if is_simulation_mode():
+        mc.save_trajectory(file_path)
+    else:
+        print('[警告] 真机模式下不支持轨迹保存')
+
+def load_trajectory(file_path=None):
+    '''
+    加载轨迹（仅仿真模式有效）
+    '''
+    if is_simulation_mode():
+        return mc.load_trajectory(file_path)
+    else:
+        print('[警告] 真机模式下不支持轨迹加载')
+        return None
+
+def playback_trajectory(trajectory=None, speed_multiplier=1.0):
+    '''
+    回放轨迹（仅仿真模式有效）
+    '''
+    if is_simulation_mode():
+        mc.playback_trajectory(trajectory, speed_multiplier)
+    else:
+        print('[警告] 真机模式下不支持轨迹回放')

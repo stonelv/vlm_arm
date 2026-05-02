@@ -1,10 +1,20 @@
 # utils_pump.py
 # 同济子豪兄 2024-5-22
 # GPIO引脚、吸泵相关函数
+# 支持真机/仿真模式切换
 
 print('导入吸泵控制模块')
-import RPi.GPIO as GPIO
+
+from config import is_simulation_mode
 import time
+
+# 根据模式选择GPIO接口
+if is_simulation_mode():
+    print('[模式检测] 仿真模式，使用模拟GPIO接口')
+    from simulated_robot import GPIO
+else:
+    print('[模式检测] 真机模式，使用真实RPi.GPIO接口')
+    import RPi.GPIO as GPIO
 
 # 初始化GPIO
 GPIO.setwarnings(False)   # 不打印 warning 信息

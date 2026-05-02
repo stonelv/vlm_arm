@@ -1,0 +1,186 @@
+{
+  "start_time": "2026-05-02T09:09:28.339152",
+  "total_actions": 6,
+  "trajectory": [
+    {
+      "timestamp": "2026-05-02T09:09:27.827276",
+      "action_type": "send_angles",
+      "params": {
+        "angles": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "speed": 40
+      },
+      "state_before": {
+        "angles": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "coords": [
+          160,
+          -100,
+          200,
+          0,
+          180,
+          90
+        ]
+      }
+    },
+    {
+      "timestamp": "2026-05-02T09:09:27.928457",
+      "action_type": "send_coords",
+      "params": {
+        "coords": [
+          150,
+          -100,
+          200,
+          0,
+          180,
+          90
+        ],
+        "speed": 20,
+        "mode": 0
+      },
+      "state_before": {
+        "angles": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "coords": [
+          160,
+          -100,
+          200,
+          0,
+          180,
+          90
+        ]
+      }
+    },
+    {
+      "timestamp": "2026-05-02T09:09:28.032026",
+      "action_type": "send_angle",
+      "params": {
+        "joint_index": 1,
+        "angle": 30,
+        "speed": 50
+      },
+      "state_before": {
+        "angles": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "coords": [
+          150,
+          -100,
+          200,
+          0,
+          180,
+          90
+        ]
+      }
+    },
+    {
+      "timestamp": "2026-05-02T09:09:28.134043",
+      "action_type": "send_angle",
+      "params": {
+        "joint_index": 1,
+        "angle": 0,
+        "speed": 50
+      },
+      "state_before": {
+        "angles": [
+          30,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "coords": [
+          150,
+          -100,
+          200,
+          0,
+          180,
+          90
+        ]
+      }
+    },
+    {
+      "timestamp": "2026-05-02T09:09:28.234741",
+      "action_type": "send_coords",
+      "params": {
+        "coords": [
+          100,
+          -50,
+          150,
+          0,
+          180,
+          90
+        ],
+        "speed": 20,
+        "mode": 0
+      },
+      "state_before": {
+        "angles": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "coords": [
+          150,
+          -100,
+          200,
+          0,
+          180,
+          90
+        ]
+      }
+    },
+    {
+      "timestamp": "2026-05-02T09:09:28.338875",
+      "action_type": "set_fresh_mode",
+      "params": {
+        "mode": 0
+      },
+      "state_before": {
+        "angles": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "coords": [
+          100,
+          -50,
+          150,
+          0,
+          180,
+          90
+        ]
+      }
+    }
+  ]
+}
