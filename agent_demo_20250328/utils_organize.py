@@ -13,17 +13,45 @@ from typing import List, Dict, Tuple, Optional
 import json
 import os
 
-# 全局变量
+# 首先尝试直接从 utils_robot 导入所有内容（项目标准方式）
+# 这会导入 mc、pump_move、back_zero、top_view_shot 等
+try:
+    from utils_robot import *
+    print('    从 utils_robot 成功导入机械臂模块')
+    ROBOT_IMPORTED = True
+except Exception as e:
+    print(f'    从 utils_robot 导入失败: {e}')
+    ROBOT_IMPORTED = False
+
+# 从 utils_camera 导入（确保 top_view_shot 可用）
+try:
+    from utils_camera import *
+    print('    从 utils_camera 成功导入摄像头模块')
+except Exception as e:
+    print(f'    从 utils_camera 导入失败: {e}')
+
+# 全局变量 - 模拟模式回退
 SIMULATION_MODE = False  # 模拟模式：True 不操作实际机械臂，用于测试
-mc = None
-pump_move = None
-back_zero = None
-top_view_shot = None
 GPIO = None
 
 # API Key 验证
 Qwen_KEY = None
 YI_KEY = None
+
+# 如果从 utils_robot 导入失败，使用动态依赖检查机制
+if not ROBOT_IMPORTED:
+    print('    启用动态依赖检查机制...')
+    
+    # 定义需要的全局变量
+    global mc
+    global pump_move
+    global back_zero
+    global top_view_shot
+    
+    mc = None
+    pump_move = None
+    back_zero = None
+    top_view_shot = None
 
 def check_and_import_dependencies():
     '''

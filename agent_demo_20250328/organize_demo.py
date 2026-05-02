@@ -26,7 +26,21 @@ os.makedirs('visualizations', exist_ok=True)
 # 导入模块
 print('正在导入模块...')
 
-# 先导入 utils_organize，它会自动处理依赖检查
+# 首先导入 utils_robot（项目标准方式），确保 mc、pump_move 等变量可用
+try:
+    from utils_robot import *
+    print('    从 utils_robot 成功导入机械臂模块')
+except Exception as e:
+    print(f'    警告: 从 utils_robot 导入失败: {e}')
+
+# 导入 utils_camera 确保摄像头函数可用
+try:
+    from utils_camera import *
+    print('    从 utils_camera 成功导入摄像头模块')
+except Exception as e:
+    print(f'    警告: 从 utils_camera 导入失败: {e}')
+
+# 导入 utils_organize，它会自动处理依赖检查
 from utils_organize import (
     organize_objects, 
     multi_object_detection, 
@@ -34,12 +48,13 @@ from utils_organize import (
     SIMULATION_MODE  # 导入模拟模式标志
 )
 
-# 尝试导入其他工具模块，失败则忽略
+# 确保 check_camera 可用
 check_camera = None
 try:
+    # 尝试从 utils_camera 获取（如果上面的 import * 没有成功）
     from utils_camera import check_camera
-except Exception as e:
-    print(f'    警告: 无法导入摄像头模块: {e}')
+except:
+    pass
 
 # 预设演示指令
 PRESET_INSTRUCTIONS = {
