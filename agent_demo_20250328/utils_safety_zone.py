@@ -462,22 +462,33 @@ class PathPlanner:
                 cx, cy, cz = zone.center
                 radius = zone.dimensions[0] if zone.zone_type == ZoneType.SPHERE else max(zone.dimensions)
                 
-                mid_x = (start[0] + end[0]) / 2
-                mid_y = (start[1] + end[1]) / 2
-                
-                dx = mid_x - cx
-                dy = mid_y - cy
+                dx = end[0] - start[0]
+                dy = end[1] - start[1]
                 dist = np.sqrt(dx**2 + dy**2)
                 
                 if dist > 0:
-                    scale = (radius + self.min_detour_distance) / dist
-                    detour_x = cx + dx * scale
-                    detour_y = cy + dy * scale
+                    perp_dx = -dy / dist
+                    perp_dy = dx / dist
                     
-                    detour_point = (detour_x, detour_y, self.safe_height)
+                    detour_distance = radius + self.min_detour_distance + 20
                     
-                    if self.check_path_safe(start_high, detour_point)[0]:
-                        waypoints.append(detour_point)
+                    detour1_x = (start[0] + end[0]) / 2 + perp_dx * detour_distance
+                    detour1_y = (start[1] + end[1]) / 2 + perp_dy * detour_distance
+                    detour1 = (detour1_x, detour1_y, self.safe_height)
+                    
+                    detour2_x = (start[0] + end[0]) / 2 - perp_dx * detour_distance
+                    detour2_y = (start[1] + end[1]) / 2 - perp_dy * detour_distance
+                    detour2 = (detour2_x, detour2_y, self.safe_height)
+                    
+                    detour1_safe = self.check_path_safe(start_high, detour1)[0] and \
+                                   self.check_path_safe(detour1, end_high)[0]
+                    detour2_safe = self.check_path_safe(start_high, detour2)[0] and \
+                                   self.check_path_safe(detour2, end_high)[0]
+                    
+                    if detour1_safe:
+                        waypoints.append(detour1)
+                    elif detour2_safe:
+                        waypoints.append(detour2)
         
         waypoints.append(end_high)
         

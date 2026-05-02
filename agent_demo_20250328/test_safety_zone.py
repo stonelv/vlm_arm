@@ -318,6 +318,190 @@ class TestPathPlanner(unittest.TestCase):
         self.assertAlmostEqual(length, 200.0)
 
 
+class TestPathPlannerP1Priority(unittest.TestCase):
+    
+    def setUp(self):
+        self.zone_manager = ZoneManager()
+        self.planner = PathPlanner(self.zone_manager)
+    
+    def test_p1_path_safe_direct_traffic(self):
+        start = (0, 0, 100)
+        end = (200, 0, 100)
+        
+        is_safe, _ = self.planner.check_path_safe(start, end)
+        self.assertTrue(is_safe)
+        
+        waypoints = self.planner.plan_alternate_path(start, end)
+        
+        self.assertEqual(waypoints[0], start)
+        self.assertEqual(waypoints[-1], end)
+        self.assertEqual(len(waypoints), 2)
+    
+    def test_p1_path_blocked_arc_detour(self):
+        obstacle = SafetyZone(
+            name="中央障碍物",
+            zone_type=ZoneType.SPHERE,
+            center=(100, 0, 100),
+            dimensions=(30, 0, 0),
+            warning_distance=20,
+            danger_distance=10
+        )
+        self.zone_manager.add_zone(obstacle)
+        
+        start = (0, 0, 100)
+        end = (200, 0, 100)
+        
+        is_safe, _ = self.planner.check_path_safe(start, end)
+        self.assertFalse(is_safe)
+        
+        waypoints = self.planner.plan_alternate_path(start, end)
+        
+        self.assertEqual(waypoints[0], start)
+        self.assertEqual(waypoints[-1], end)
+        self.assertGreater(len(waypoints), 2)
+        
+        for i in range(len(waypoints) - 1):
+            safe, _ = self.planner.check_path_safe(waypoints[i], waypoints[i + 1])
+            self.assertTrue(safe, f"路段 {i}->{i+1} 不安全")
+    
+    def test_p1_smooth_path_generation(self):
+        obstacle = SafetyZone(
+            name="障碍物",
+            zone_type=ZoneType.SPHERE,
+            center=(100, 0, 100),
+            dimensions=(30, 0, 0),
+            warning_distance=20,
+            danger_distance=10
+        )
+        self.zone_manager.add_zone(obstacle)
+        
+        start = (0, 0, 100)
+        end = (200, 0, 100)
+        
+        smooth_waypoints = self.planner.plan_smooth_path(start, end, num_waypoints=5)
+        
+        self.assertEqual(smooth_waypoints[0], start)
+        self.assertEqual(smooth_waypoints[-1], end)
+        self.assertGreater(len(smooth_waypoints), 2)
+        
+        for i in range(len(smooth_waypoints) - 1):
+            safe, _ = self.planner.check_path_safe(smooth_waypoints[i], smooth_waypoints[i + 1])
+            self.assertTrue(safe, f"平滑路径路段 {i}->{i+1} 不安全")
+    
+    def test_p1_smooth_path_returns_consistent_format(self):
+        start = (0, 0, 100)
+        end = (200, 100, 100)
+        
+        smooth_waypoints = self.planner.plan_smooth_path(start, end, num_waypoints=5)
+        
+        self.assertIsInstance(smooth_waypoints, list)
+        self.assertGreater(len(smooth_waypoints), 0)
+        self.assertEqual(smooth_waypoints[0], start)
+        self.assertEqual(smooth_waypoints[-1], end)
+        
+        for wp in smooth_waypoints:
+            self.assertIsInstance(wp, tuple)
+            self.assertEqual(len(wp), 3)
+    
+    def test_p1_arc_waypoints_clockwise_vs_counter(self):
+        obstacle = SafetyZone(
+            name="障碍物",
+            zone_type=ZoneType.SPHERE,
+            center=(100, 0, 100),
+            dimensions=(30, 0, 0),
+            warning_distance=20,
+            danger_distance=10
+        )
+        self.zone_manager.add_zone(obstacle)
+        
+        start = (0, 0, 100)
+        end = (200, 0, 100)
+        obstacle_center = (100, 0, 100)
+        obstacle_radius = 30
+        
+        clockwise_wp = self.planner._generate_arc_waypoints(
+            start, end, obstacle_center, obstacle_radius, clockwise=True
+        )
+        
+        counter_wp = self.planner._generate_arc_waypoints(
+            start, end, obstacle_center, obstacle_radius, clockwise=False
+        )
+        
+        self.assertEqual(clockwise_wp[0], start)
+        self.assertEqual(clockwise_wp[-1], end)
+        self.assertEqual(counter_wp[0], start)
+        self.assertEqual(counter_wp[-1], end)
+        
+        safe_radius = obstacle_radius + self.planner.min_detour_distance
+        
+        for wp in clockwise_wp:
+            dx = wp[0] - obstacle_center[0]
+            dy = wp[1] - obstacle_center[1]
+            dist = np.sqrt(dx**2 + dy**2)
+            self.assertGreater(dist, obstacle_radius - 1e-6)
+        
+        for wp in counter_wp:
+            dx = wp[0] - obstacle_center[0]
+            dy = wp[1] - obstacle_center[1]
+            dist = np.sqrt(dx**2 + dy**2)
+            self.assertGreater(dist, obstacle_radius - 1e-6)
+    
+    def test_p1_is_point_safe(self):
+        self.assertTrue(self.planner.is_point_safe((0, 0, 100)))
+        self.assertTrue(self.planner.is_point_safe((200, 200, 100)))
+        
+        obstacle = SafetyZone(
+            name="危险区",
+            zone_type=ZoneType.SPHERE,
+            center=(100, 100, 100),
+            dimensions=(50, 0, 0),
+            warning_distance=20,
+            danger_distance=10
+        )
+        self.zone_manager.add_zone(obstacle)
+        
+        self.assertTrue(self.planner.is_point_safe((0, 0, 100)))
+        self.assertFalse(self.planner.is_point_safe((100, 100, 100)))
+        self.assertFalse(self.planner.is_point_safe((120, 100, 100)))
+    
+    def test_p1_estimate_path_length_accuracy(self):
+        waypoints = [(0, 0, 0), (100, 0, 0), (100, 100, 0), (0, 100, 0)]
+        
+        length = self.planner.estimate_path_length(waypoints)
+        
+        expected = 300.0
+        self.assertAlmostEqual(length, expected)
+    
+    def test_p1_get_obstacle_info(self):
+        obstacle1 = SafetyZone(
+            name="障碍1",
+            zone_type=ZoneType.SPHERE,
+            center=(100, 0, 100),
+            dimensions=(30, 0, 0),
+            warning_distance=20,
+            danger_distance=10
+        )
+        self.zone_manager.add_zone(obstacle1)
+        
+        obstacle2 = SafetyZone(
+            name="障碍2",
+            zone_type=ZoneType.SPHERE,
+            center=(300, 0, 100),
+            dimensions=(30, 0, 0),
+            warning_distance=20,
+            danger_distance=10
+        )
+        self.zone_manager.add_zone(obstacle2)
+        
+        start = (0, 0, 100)
+        end = (200, 0, 100)
+        
+        obstacles = self.planner._get_obstacle_info(start, end)
+        
+        self.assertEqual(len(obstacles), 1)
+        self.assertEqual(obstacles[0][0].name, "障碍1")
+
+
 class TestSafetyMonitor(unittest.TestCase):
     
     def setUp(self):
