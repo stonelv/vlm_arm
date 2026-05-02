@@ -18,6 +18,7 @@ from utils_vlm_move import *        # 多模态大模型识别图像，吸泵吸
 from utils_drag_teaching import *   # 拖动示教
 from utils_agent import *           # 智能体Agent编排
 from utils_tts import *             # 语音合成模块
+from utils_organize import *        # 智能整理系统：多物体检测、属性分析、排序整理、对比图像
 
 # print('播放欢迎词')
 pump_off()
