@@ -12,16 +12,34 @@ print('  2. 结合视觉模型检测物体属性（颜色、大小、姿态、�
 print('  3. 智能生成抓取点与放置序列')
 print('  4. 针对不规则/易损物品的特殊处理（轻柔操作）')
 print('  5. 自动输出整理前后对比图像')
+print('  6. 支持模拟模式（无实际硬件也可测试）')
 print('='*70 + '\n')
 
 import sys
 import json
+import os
+
+# 确保 temp 目录存在
+os.makedirs('temp', exist_ok=True)
+os.makedirs('visualizations', exist_ok=True)
 
 # 导入模块
 print('正在导入模块...')
-from utils_organize import organize_objects, multi_object_detection, create_before_after_comparison
-from utils_camera import check_camera
-from utils_robot import back_zero
+
+# 先导入 utils_organize，它会自动处理依赖检查
+from utils_organize import (
+    organize_objects, 
+    multi_object_detection, 
+    create_before_after_comparison,
+    SIMULATION_MODE  # 导入模拟模式标志
+)
+
+# 尝试导入其他工具模块，失败则忽略
+check_camera = None
+try:
+    from utils_camera import check_camera
+except Exception as e:
+    print(f'    警告: 无法导入摄像头模块: {e}')
 
 # 预设演示指令
 PRESET_INSTRUCTIONS = {
@@ -37,18 +55,32 @@ def show_menu():
     print('\n' + '-'*50)
     print('请选择操作模式：')
     print('-'*50)
+    print(f'当前运行模式: {"模拟模式 (无硬件)" if SIMULATION_MODE else "正常模式 (连接硬件)"}')
+    print('-'*50)
     print('1. 预设指令：按颜色深浅从深到浅排列（水果）')
     print('2. 预设指令：按颜色深浅从浅到深排列（水果）')
     print('3. 预设指令：把散落的卡片叠整齐')
     print('4. 预设指令：按大小排序（积木）')
     print('5. 预设指令：整齐排列所有物品')
     print('6. 自定义输入指令')
-    print('7. 测试摄像头')
+    if check_camera:
+        print('7. 测试摄像头')
     print('8. 退出程序')
     print('-'*50)
 
 def main():
     '''主函数'''
+    
+    # 显示当前模式
+    if SIMULATION_MODE:
+        print('\n提示：当前在模拟模式下运行')
+        print('      - 不会操作实际机械臂')
+        print('      - 使用模拟的检测数据')
+        print('      - 生成模拟的整理后图像')
+    else:
+        print('\n提示：当前在正常模式下运行')
+        print('      - 将操作实际机械臂')
+        print('      - 确保机械臂已连接并通电')
     
     while True:
         show_menu()
@@ -58,7 +90,7 @@ def main():
             print('感谢使用，再见！')
             sys.exit(0)
         
-        elif choice == '7':
+        elif choice == '7' and check_camera:
             print('\n测试摄像头（按q键退出）')
             try:
                 check_camera()
@@ -98,6 +130,7 @@ def main():
             print('='*70)
             print(f'执行状态：{"成功" if result["success"] else "失败"}')
             print(f'原始指令：{result["prompt"]}')
+            print(f'运行模式：{"模拟模式" if result.get("simulation_mode", False) else "正常模式"}')
             
             if result['success']:
                 print(f'检测到物体数量：{len(result.get("objects_detected", []))}')
@@ -129,14 +162,33 @@ def main():
                         tag_str = f' [{", ".join(tags)}]' if tags else ''
                         
                         print(f'  {idx}. {name} - 颜色:{color}, 深浅度:{color_depth}/10, 大小:{size}{tag_str}')
+                
+                # 显示抓取计划详情
+                grasp_sequence = grasp_plan.get('grasp_sequence', [])
+                if grasp_sequence:
+                    print(f'\n抓取计划详情：')
+                    for step in grasp_sequence:
+                        step_num = step.get('step', 0)
+                        obj_name = step.get('object_name', '未知')
+                        special = step.get('special_handling', '无')
+                        reason = step.get('reason', '')
+                        
+                        print(f'  步骤{step_num}: {obj_name}')
+                        if special != '无特殊处理':
+                            print(f'    特殊处理: {special}')
+                        if reason:
+                            print(f'    原因: {reason}')
             else:
                 print(f'错误信息：{result.get("error_message", "未知错误")}')
             
             # 保存完整结果到JSON文件
             result_file = 'temp/last_organize_result.json'
-            with open(result_file, 'w', encoding='utf-8') as f:
-                json.dump(result, f, ensure_ascii=False, indent=2)
-            print(f'\n完整结果已保存至：{result_file}')
+            try:
+                with open(result_file, 'w', encoding='utf-8') as f:
+                    json.dump(result, f, ensure_ascii=False, indent=2)
+                print(f'\n完整结果已保存至：{result_file}')
+            except Exception as e:
+                print(f'警告: 保存结果JSON失败: {e}')
                 
         except KeyboardInterrupt:
             print('\n\n用户中断操作')
