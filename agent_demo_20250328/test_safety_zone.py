@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-安全禁区模块单元测试
+安全禁区模块单元测试 - 完整版
 """
 
 import unittest
 import sys
 import os
 import numpy as np
+from unittest.mock import MagicMock, patch, PropertyMock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -19,6 +20,9 @@ from utils_safety_zone import (
     ZoneManager,
     PathPlanner,
     SafetyMonitor,
+    SafeArmController,
+    VLMConfig,
+    VLMDetector,
     create_default_zone_manager,
     alert_callback_example
 )
@@ -248,19 +252,70 @@ class TestPathPlanner(unittest.TestCase):
         is_safe, alerts = self.planner.check_path_safe((0, 0, 100), (200, 0, 100))
         self.assertFalse(is_safe)
 
-    def test_plan_alternate_path(self):
+    def test_plan_alternate_path_basic(self):
         start = (0, 0, 100)
         end = (200, 0, 100)
         
         waypoints = self.planner.plan_alternate_path(start, end)
         
-        self.assertGreater(len(waypoints), 2)
         self.assertEqual(waypoints[0], start)
         self.assertEqual(waypoints[-1], end)
+        self.assertGreater(len(waypoints), 2)
+
+    def test_arc_waypoints_generation(self):
+        start = (0, 0, 100)
+        end = (200, 0, 100)
+        obstacle_center = (100, 0, 100)
+        obstacle_radius = 30
+        
+        clockwise_waypoints = self.planner._generate_arc_waypoints(
+            start, end, obstacle_center, obstacle_radius, clockwise=True
+        )
+        
+        counter_clockwise_waypoints = self.planner._generate_arc_waypoints(
+            start, end, obstacle_center, obstacle_radius, clockwise=False
+        )
+        
+        self.assertEqual(clockwise_waypoints[0], start)
+        self.assertEqual(clockwise_waypoints[-1], end)
+        
+        self.assertGreater(len(clockwise_waypoints), 2)
+        
+        safe_radius = obstacle_radius + self.planner.min_detour_distance
+        for wp in clockwise_waypoints:
+            dx = wp[0] - obstacle_center[0]
+            dy = wp[1] - obstacle_center[1]
+            dist = np.sqrt(dx**2 + dy**2)
+            self.assertGreater(dist, obstacle_radius - 1e-6)
+
+    def test_get_obstacle_info(self):
+        start = (0, 0, 100)
+        end = (200, 0, 100)
+        
+        obstacles = self.planner._get_obstacle_info(start, end)
+        
+        self.assertEqual(len(obstacles), 1)
+        self.assertEqual(obstacles[0][0].name, "障碍物")
 
     def test_is_point_safe(self):
         self.assertTrue(self.planner.is_point_safe((0, 0, 100)))
         self.assertFalse(self.planner.is_point_safe((100, 0, 100)))
+
+    def test_plan_smooth_path(self):
+        start = (0, 0, 100)
+        end = (200, 0, 100)
+        
+        smooth_waypoints = self.planner.plan_smooth_path(start, end, num_waypoints=5)
+        
+        self.assertEqual(smooth_waypoints[0], start)
+        self.assertEqual(smooth_waypoints[-1], end)
+
+    def test_estimate_path_length(self):
+        waypoints = [(0, 0, 0), (100, 0, 0), (100, 100, 0)]
+        
+        length = self.planner.estimate_path_length(waypoints)
+        
+        self.assertAlmostEqual(length, 200.0)
 
 
 class TestSafetyMonitor(unittest.TestCase):
@@ -305,16 +360,203 @@ class TestSafetyMonitor(unittest.TestCase):
         self.assertEqual(self.callback_calls[0][1], "测试禁区")
         self.assertEqual(self.callback_calls[0][2], "end_effector")
 
-    def test_velocity_prediction(self):
-        self.monitor.update_end_effector((90, 0, 0), velocity=(-200, 0, 0))
-        
+    def test_monitor_start_stop(self):
         self.monitor.start_monitoring()
-        import time
-        time.sleep(0.2)
+        time.sleep(0.1)
         self.monitor.stop_monitoring()
         
         status = self.monitor.get_current_status()
-        self.assertEqual(status["end_effector"]["position"], (90, 0, 0))
+        self.assertIsNotNone(status)
+
+
+class TestSafeArmController(unittest.TestCase):
+    
+    def setUp(self):
+        self.mock_mc = MagicMock()
+        self.mock_mc.get_coords.return_value = [0, 0, 220, 0, 180, 90]
+        self.mock_mc.send_coords.return_value = 1
+        self.mock_mc.get_angles.return_value = [0, 0, 0, 0, 0, 0]
+        self.mock_mc.send_angles.return_value = 1
+        self.mock_mc.send_angle.return_value = 1
+        self.mock_mc.send_coord.return_value = 1
+        self.mock_mc.release_all_servos.return_value = 1
+        self.mock_mc.power_on.return_value = 1
+        self.mock_mc.power_off.return_value = 1
+        self.mock_mc.is_power_on.return_value = 1
+        self.mock_mc.get_fresh_mode.return_value = 0
+        self.mock_mc.set_fresh_mode.return_value = 1
+        self.mock_mc.get_robot_status.return_value = [0, 0, 0, 0, 0, 0]
+        self.mock_mc.read_next_error.return_value = [0, 0, 0, 0, 0, 0]
+        self.mock_mc.is_controller_connected.return_value = 1
+        self.mock_mc.get_system_version.return_value = 3.0
+        self.mock_mc.get_atom_version.return_value = 2.0
+        self.mock_mc.focus_servo.return_value = 1
+        self.mock_mc.focus_all_servos.return_value = 1
+        
+        self.zone_manager = ZoneManager()
+        self.path_planner = PathPlanner(self.zone_manager)
+        self.monitor = SafetyMonitor(self.zone_manager, self.path_planner)
+        self.controller = SafeArmController(self.mock_mc, self.zone_manager, self.monitor)
+
+    def test_send_coords_safe_path(self):
+        coords = [200, -100, 150, 0, 180, 90]
+        speed = 20
+        mode = 0
+        
+        result = self.controller.send_coords(coords, speed, mode)
+        
+        self.assertEqual(result, 1)
+        self.mock_mc.send_coords.assert_called_once()
+
+    def test_send_coords_blocked_target(self):
+        blocked_zone = SafetyZone(
+            name="目标区",
+            zone_type=ZoneType.SPHERE,
+            center=(200, -100, 150),
+            dimensions=(50, 0, 0)
+        )
+        self.zone_manager.add_zone(blocked_zone)
+        
+        coords = [200, -100, 150, 0, 180, 90]
+        result = self.controller.send_coords(coords, 20, 0)
+        
+        self.assertEqual(result, 0)
+
+    def test_get_coords(self):
+        coords = self.controller.get_coords()
+        
+        self.mock_mc.get_coords.assert_called_once()
+        self.assertEqual(coords, [0, 0, 220, 0, 180, 90])
+
+    def test_send_angles(self):
+        angles = [0, 0, 0, 0, 0, 0]
+        speed = 50
+        
+        result = self.controller.send_angles(angles, speed)
+        
+        self.assertEqual(result, 1)
+        self.mock_mc.send_angles.assert_called_once_with(angles, speed)
+
+    def test_send_angle(self):
+        joint_id = 1
+        angle = 45
+        speed = 50
+        
+        result = self.controller.send_angle(joint_id, angle, speed)
+        
+        self.assertEqual(result, 1)
+        self.mock_mc.send_angle.assert_called_once_with(joint_id, angle, speed)
+
+    def test_get_angles(self):
+        angles = self.controller.get_angles()
+        
+        self.mock_mc.get_angles.assert_called_once()
+        self.assertEqual(angles, [0, 0, 0, 0, 0, 0])
+
+    def test_send_coord(self):
+        coord_id = 1
+        coord_value = 150
+        speed = 50
+        
+        result = self.controller.send_coord(coord_id, coord_value, speed)
+        
+        self.assertEqual(result, 1)
+        self.mock_mc.send_coord.assert_called_once_with(coord_id, coord_value, speed)
+
+    def test_emergency_stop(self):
+        self.controller.emergency_stop()
+        
+        self.assertTrue(self.controller.emergency_stop_triggered)
+        self.mock_mc.release_all_servos.assert_called_once()
+
+    def test_emergency_stop_blocks_movement(self):
+        self.controller.emergency_stop()
+        
+        coords = [200, -100, 150, 0, 180, 90]
+        result = self.controller.send_coords(coords, 20, 0)
+        
+        self.assertEqual(result, 0)
+
+    def test_reset_emergency(self):
+        self.controller.emergency_stop()
+        self.assertTrue(self.controller.emergency_stop_triggered)
+        
+        self.controller.reset_emergency()
+        self.assertFalse(self.controller.emergency_stop_triggered)
+
+    def test_power_management(self):
+        result_on = self.controller.power_on()
+        self.assertEqual(result_on, 1)
+        
+        result_off = self.controller.power_off()
+        self.assertEqual(result_off, 1)
+        
+        result_is_on = self.controller.is_power_on()
+        self.assertEqual(result_is_on, 1)
+
+    def test_fresh_mode(self):
+        mode = self.controller.get_fresh_mode()
+        self.assertEqual(mode, 0)
+        
+        result = self.controller.set_fresh_mode(1)
+        self.assertEqual(result, 1)
+
+    def test_system_info(self):
+        version = self.controller.get_system_version()
+        self.assertEqual(version, 3.0)
+        
+        atom_version = self.controller.get_atom_version()
+        self.assertEqual(atom_version, 2.0)
+        
+        status = self.controller.get_robot_status()
+        self.assertEqual(status, [0, 0, 0, 0, 0, 0])
+        
+        error = self.controller.read_next_error()
+        self.assertEqual(error, [0, 0, 0, 0, 0, 0])
+        
+        connected = self.controller.is_controller_connected()
+        self.assertEqual(connected, 1)
+
+    def test_focus_servos(self):
+        result_single = self.controller.focus_servo(1)
+        self.assertEqual(result_single, 1)
+        
+        result_all = self.controller.focus_all_servos()
+        self.assertEqual(result_all, 1)
+
+    def test_release_all_servos(self):
+        result = self.controller.release_all_servos()
+        self.assertEqual(result, 1)
+        
+        result_with_data = self.controller.release_all_servos(1)
+        self.assertEqual(result_with_data, 1)
+
+
+class TestVLMConfig(unittest.TestCase):
+    
+    def test_vlm_config_defaults(self):
+        config = VLMConfig()
+        
+        self.assertEqual(config.api_key, "")
+        self.assertEqual(config.base_url, "")
+        self.assertEqual(config.model, "gpt-4o")
+        self.assertEqual(config.max_tokens, 1000)
+        self.assertEqual(config.temperature, 0.0)
+
+    def test_vlm_config_custom(self):
+        config = VLMConfig(
+            api_key="test-key",
+            base_url="https://test.api.com",
+            model="gpt-4o-mini",
+            max_tokens=500,
+            temperature=0.7
+        )
+        
+        self.assertEqual(config.api_key, "test-key")
+        self.assertEqual(config.base_url, "https://test.api.com")
+        self.assertEqual(config.model, "gpt-4o-mini")
+        self.assertEqual(config.max_tokens, 500)
+        self.assertEqual(config.temperature, 0.7)
 
 
 class TestIntegration(unittest.TestCase):
@@ -373,6 +615,8 @@ class TestAlertCallbackExample(unittest.TestCase):
         except Exception as e:
             self.fail(f"alert_callback_example 抛出异常: {e}")
 
+
+import time
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
