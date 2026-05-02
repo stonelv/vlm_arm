@@ -14,6 +14,30 @@ from utils_robot import *
 from utils_asr import *
 from utils_tts import *
 from utils_vlm import *
+from API_KEY import *
+
+VLM_TRACKING_PROMPT = '''
+分析这张图片，找出所有的人脸和指定颜色的物体（红色、绿色、蓝色、黄色盒子/物体）。
+
+对于每个检测到的目标，输出以下格式的JSON数据：
+{
+  "detected": [
+    {
+      "type": "face",
+      "name": "人脸",
+      "bbox": [x1, y1, x2, y2],
+      "confidence": 0.95
+    }
+  ]
+}
+
+其中：
+- type 可以是: "face" (人脸), "red_box" (红色物体), "green_box" (绿色物体), "blue_box" (蓝色物体), "yellow_box" (黄色物体)
+- bbox 是左上角和右下角的像素坐标 [x1, y1, x2, y2]
+- confidence 是检测置信度 0.0-1.0
+
+只输出JSON本身，不要输出其它内容，不要包含```json标记。
+'''
 
 class TrackingConfig:
     TRACKING_TARGET_TYPES = {
@@ -43,6 +67,16 @@ class TrackingConfig:
     
     PITCH_ANGLE = -45
     GRIPPER_ROTATION = 0
+    
+    VLM_INTERVAL = 10
+    FOCAL_LENGTH = 500.0
+    REAL_FACE_WIDTH = 0.16
+    REAL_BOX_WIDTH = 0.06
+    
+    CALI_1_IM = [130, 290]
+    CALI_1_MC = [-21.8, -197.4]
+    CALI_2_IM = [640, 0]
+    CALI_2_MC = [215, -59.1]
 
 class TargetState:
     def __init__(self):
@@ -58,40 +92,122 @@ class TargetState:
 
 class VisualDetector:
     def __init__(self):
-        self.face_cascade = self._load_face_detector()
         self.tracking_config = TrackingConfig()
+        self.vlm_frame_counter = 0
+        self.vlm_cached_results = None
+        self.temp_img_path = 'temp/vl_tracking.jpg'
         
-    def _load_face_detector(self):
-        face_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-        face_cascade = cv2.CascadeClassifier(face_cascade_path)
-        if face_cascade.empty():
-            print('警告：人脸检测器加载失败')
-        return face_cascade
-    
-    def detect_face(self, frame):
-        if self.face_cascade.empty():
+    def _call_vlm_for_detection(self, frame):
+        try:
+            cv2.imwrite(self.temp_img_path, frame)
+            
+            import openai
+            from openai import OpenAI
+            import base64
+            
+            API_BASE = "https://api.lingyiwanwu.com/v1"
+            API_KEY = YI_KEY
+            
+            client = OpenAI(api_key=API_KEY, base_url=API_BASE)
+            
+            with open(self.temp_img_path, 'rb') as image_file:
+                image = 'data:image/jpeg;base64,' + base64.b64encode(image_file.read()).decode('utf-8')
+            
+            completion = client.chat.completions.create(
+                model="yi-vision",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": VLM_TRACKING_PROMPT
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": image
+                                }
+                            }
+                        ]
+                    }
+                ]
+            )
+            
+            result_str = completion.choices[0].message.content.strip()
+            print(f'VLM 原始返回: {result_str}')
+            
+            try:
+                result = eval(result_str)
+                self.vlm_cached_results = result
+                return result
+            except Exception as e:
+                print(f'VLM 结果解析错误: {e}')
+                import json
+                try:
+                    json_start = result_str.find('{')
+                    json_end = result_str.rfind('}') + 1
+                    if json_start >= 0 and json_end > json_start:
+                        json_str = result_str[json_start:json_end]
+                        result = json.loads(json_str)
+                        self.vlm_cached_results = result
+                        return result
+                except:
+                    pass
+                return None
+                
+        except Exception as e:
+            print(f'VLM 调用错误: {e}')
+            import traceback
+            traceback.print_exc()
             return None
-        
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(
-            gray, 
-            scaleFactor=1.1, 
-            minNeighbors=5, 
-            minSize=(60, 60)
-        )
-        
-        if len(faces) > 0:
-            faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
-            x, y, w, h = faces[0]
-            return {
-                'bbox': [x, y, x + w, y + h],
-                'center': (x + w // 2, y + h // 2),
-                'area': w * h,
-                'type': 'face'
-            }
-        return None
     
-    def detect_color_object(self, frame, target_type):
+    def _parse_vlm_results(self, vlm_result, frame):
+        detected_targets = []
+        
+        if not vlm_result or 'detected' not in vlm_result:
+            return detected_targets
+        
+        img_h, img_w = frame.shape[:2]
+        
+        for item in vlm_result.get('detected', []):
+            target_type = item.get('type')
+            bbox = item.get('bbox', [])
+            name = item.get('name', '')
+            
+            if target_type not in self.tracking_config.TRACKING_TARGET_TYPES:
+                continue
+            
+            if len(bbox) < 4:
+                continue
+            
+            x1, y1, x2, y2 = bbox
+            
+            if x1 <= 1 and x2 <= 1 and y1 <= 1 and y2 <= 1:
+                x1 = int(x1 * img_w)
+                y1 = int(y1 * img_h)
+                x2 = int(x2 * img_w)
+                y2 = int(y2 * img_h)
+            
+            x1, y1 = int(x1), int(y1)
+            x2, y2 = int(x2), int(y2)
+            
+            center_x = (x1 + x2) // 2
+            center_y = (y1 + y2) // 2
+            area = (x2 - x1) * (y2 - y1)
+            
+            detected_targets.append({
+                'bbox': [x1, y1, x2, y2],
+                'center': (center_x, center_y),
+                'area': area,
+                'type': target_type,
+                'confidence': item.get('confidence', 0.8),
+                'source': 'vlm'
+            })
+        
+        return detected_targets
+    
+    def _fallback_detect_color_object(self, frame, target_type):
         config = self.tracking_config.TRACKING_TARGET_TYPES.get(target_type)
         if not config or 'color_range' not in config:
             return None
@@ -128,31 +244,73 @@ class VisualDetector:
                     'center': (x + w // 2, y + h // 2),
                     'area': area,
                     'type': target_type,
+                    'confidence': 0.6,
+                    'source': 'cv',
                     'mask': mask
                 }
         return None
     
+    def detect_face(self, frame):
+        self.vlm_frame_counter += 1
+        
+        if self.vlm_frame_counter % self.tracking_config.VLM_INTERVAL == 1 or not self.vlm_cached_results:
+            self._call_vlm_for_detection(frame)
+        
+        targets = self._parse_vlm_results(self.vlm_cached_results, frame)
+        
+        for t in targets:
+            if t['type'] == 'face':
+                return t
+        
+        return None
+    
+    def detect_color_object(self, frame, target_type):
+        self.vlm_frame_counter += 1
+        
+        if self.vlm_frame_counter % self.tracking_config.VLM_INTERVAL == 1 or not self.vlm_cached_results:
+            self._call_vlm_for_detection(frame)
+        
+        targets = self._parse_vlm_results(self.vlm_cached_results, frame)
+        
+        for t in targets:
+            if t['type'] == target_type:
+                return t
+        
+        fallback = self._fallback_detect_color_object(frame, target_type)
+        return fallback
+    
     def detect_all_targets(self, frame):
-        detected_targets = []
+        self.vlm_frame_counter += 1
         
-        face_result = self.detect_face(frame)
-        if face_result:
-            detected_targets.append(face_result)
+        vlm_targets = []
+        if self.vlm_frame_counter % self.tracking_config.VLM_INTERVAL == 1 or not self.vlm_cached_results:
+            print('调用 VLM 进行目标检测...')
+            self._call_vlm_for_detection(frame)
         
+        if self.vlm_cached_results:
+            vlm_targets = self._parse_vlm_results(self.vlm_cached_results, frame)
+        
+        vlm_types = set([t['type'] for t in vlm_targets])
+        
+        cv_targets = []
         for target_type in self.tracking_config.TRACKING_TARGET_TYPES:
-            if target_type == 'face':
-                continue
-            
-            result = self.detect_color_object(frame, target_type)
-            if result:
-                detected_targets.append(result)
+            if target_type not in vlm_types:
+                if target_type != 'face':
+                    result = self._fallback_detect_color_object(frame, target_type)
+                    if result:
+                        cv_targets.append(result)
         
-        detected_targets.sort(
-            key=lambda x: self.tracking_config.TRACKING_TARGET_TYPES[x['type']]['priority'],
+        all_targets = vlm_targets + cv_targets
+        
+        all_targets.sort(
+            key=lambda x: (
+                self.tracking_config.TRACKING_TARGET_TYPES[x['type']]['priority'],
+                x.get('confidence', 0.5)
+            ),
             reverse=True
         )
         
-        return detected_targets
+        return all_targets
 
 class MotionController:
     def __init__(self, mc):
@@ -176,30 +334,84 @@ class MotionController:
         self.is_initialized = True
         print(f'当前初始坐标: {self.current_coords}')
     
-    def pixel_to_world(self, pixel_center, frame, detected_target):
+    def _estimate_depth_by_area(self, detected_target):
+        target_type = detected_target['type']
+        area = detected_target.get('area', 10000)
+        
+        bbox = detected_target.get('bbox', [0, 0, 100, 100])
+        pixel_width = bbox[2] - bbox[0]
+        pixel_height = bbox[3] - bbox[1]
+        
+        if target_type == 'face':
+            real_width = self.config.REAL_FACE_WIDTH * 1000
+        else:
+            real_width = self.config.REAL_BOX_WIDTH * 1000
+        
+        if pixel_width > 0:
+            distance = (real_width * self.config.FOCAL_LENGTH) / pixel_width
+        else:
+            distance = self.config.DESIRED_DISTANCE
+        
+        distance = max(50, min(400, distance))
+        return distance
+    
+    def _pixel_to_robot_eye2hand(self, pixel_x, pixel_y):
+        X_cali_im = [self.config.CALI_1_IM[0], self.config.CALI_2_IM[0]]
+        X_cali_mc = [self.config.CALI_1_MC[0], self.config.CALI_2_MC[0]]
+        
+        Y_cali_im = [self.config.CALI_2_IM[1], self.config.CALI_1_IM[1]]
+        Y_cali_mc = [self.config.CALI_2_MC[1], self.config.CALI_1_MC[1]]
+        
+        X_mc = int(np.interp(pixel_x, X_cali_im, X_cali_mc))
+        Y_mc = int(np.interp(pixel_y, Y_cali_im, Y_cali_mc))
+        
+        return X_mc, Y_mc
+    
+    def _pixel_to_robot_relative(self, pixel_center, current_coords):
         img_center_x = self.config.CAMERA_WIDTH // 2
         img_center_y = self.config.CAMERA_HEIGHT // 2
         
         offset_x = pixel_center[0] - img_center_x
         offset_y = pixel_center[1] - img_center_y
         
-        scale_factor = 0.2
-        world_offset_x = offset_x * scale_factor
-        world_offset_y = offset_y * scale_factor
+        scale_factor = 0.25
         
-        target_area = detected_target.get('area', 10000)
-        distance_estimate = max(100, min(300, 25000 / np.sqrt(target_area)))
+        delta_x = -offset_y * scale_factor
+        delta_y = offset_x * scale_factor
         
-        desired_x = self.current_coords[0] - world_offset_y
-        desired_y = self.current_coords[1] + world_offset_x
+        return delta_x, delta_y
+    
+    def pixel_to_world(self, pixel_center, frame, detected_target):
+        img_h, img_w = frame.shape[:2]
         
+        distance = self._estimate_depth_by_area(detected_target)
+        print(f'估计目标距离: {distance:.1f} mm')
+        
+        robot_x, robot_y = self._pixel_to_robot_eye2hand(pixel_center[0], pixel_center[1])
+        
+        delta_x, delta_y = self._pixel_to_robot_relative(pixel_center, self.current_coords)
+        
+        desired_x = (robot_x + self.current_coords[0] + delta_x) / 2
+        desired_y = (robot_y + self.current_coords[1] + delta_y) / 2
+        
+        distance_error = distance - self.config.DESIRED_DISTANCE
+        if abs(distance_error) > self.config.DISTANCE_TOLERANCE:
+            desired_x += distance_error * 0.3
+        
+        img_center_y = img_h // 2
+        offset_y = pixel_center[1] - img_center_y
         height_adjustment = 0
+        
         if offset_y < -30:
-            height_adjustment = 5
+            height_adjustment = min(8, abs(offset_y) * 0.1)
         elif offset_y > 30:
-            height_adjustment = -5
+            height_adjustment = -min(8, abs(offset_y) * 0.1)
         
         desired_z = self.current_coords[2] + height_adjustment
+        
+        desired_x = np.clip(desired_x, 100, 350)
+        desired_y = np.clip(desired_y, -200, 200)
+        desired_z = np.clip(desired_z, 50, 250)
         
         return np.array([desired_x, desired_y, desired_z])
     
@@ -255,7 +467,10 @@ class MotionController:
     
     def stop_movement(self):
         print('停止机械臂运动')
-        self.mc.release_all_servos()
+        try:
+            self.mc.release_all_servos()
+        except:
+            pass
         time.sleep(0.5)
 
 class OcclusionHandler:
@@ -344,18 +559,23 @@ class VoiceCommandHandler:
             '红色': 'red_box',
             '红色盒子': 'red_box',
             '红盒子': 'red_box',
+            '红色物体': 'red_box',
             '绿色': 'green_box',
             '绿色盒子': 'green_box',
             '绿盒子': 'green_box',
+            '绿色物体': 'green_box',
             '蓝色': 'blue_box',
             '蓝色盒子': 'blue_box',
             '蓝盒子': 'blue_box',
+            '蓝色物体': 'blue_box',
             '黄色': 'yellow_box',
             '黄色盒子': 'yellow_box',
             '黄盒子': 'yellow_box',
+            '黄色物体': 'yellow_box',
             '人脸': 'face',
             '脸': 'face',
             '人': 'face',
+            '那个人': 'face',
         }
         
         self.action_keywords = {
@@ -363,24 +583,31 @@ class VoiceCommandHandler:
             '追踪': 'follow',
             '跟踪': 'follow',
             '看': 'follow',
+            '注视': 'follow',
             '开始': 'start',
+            '启动': 'start',
             '停止': 'stop',
             '结束': 'stop',
             '暂停': 'pause',
             '自动': 'auto',
             '恢复': 'auto',
+            '切换到自动': 'auto',
         }
     
     def listen_and_process(self):
         try:
             print('正在监听语音指令...')
+            
             record_auto()
+            
             command = speech_recognition()
             
             if command:
                 return self.process_command(command)
         except Exception as e:
             print(f'语音处理错误: {e}')
+            import traceback
+            traceback.print_exc()
         
         return None
     
@@ -443,6 +670,8 @@ class VoiceCommandHandler:
             self.target_state.is_tracking = True
             return True
         
+        tts('我没有理解您的指令，请再说一遍')
+        play_wav('temp/tts.wav')
         return False
 
 class TrackingVisualizer:
@@ -457,15 +686,17 @@ class TrackingVisualizer:
             target_type = target['type']
             priority = self.config.TRACKING_TARGET_TYPES[target_type]['priority']
             name = self.config.TRACKING_TARGET_TYPES[target_type]['name']
+            source = target.get('source', 'cv')
+            confidence = target.get('confidence', 0.5)
             
             color = (0, 255, 0) if target == selected_target else (128, 128, 128)
             thickness = 3 if target == selected_target else 1
             
             cv2.rectangle(output_frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, thickness)
             
-            label = f'{name} (P:{priority})'
+            label = f'{name} ({source}) {confidence:.0%}'
             cv2.putText(output_frame, label, (bbox[0], bbox[1] - 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
         
         if target_state.is_occluded and target_state.predicted_position is not None:
             pred_center = (int(target_state.predicted_position[0]), 
@@ -489,6 +720,9 @@ class TrackingVisualizer:
             cv2.putText(output_frame, f'目标: {target_name}', (10, 60),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
         
+        cv2.putText(output_frame, 'VLM每10帧检测一次 | 颜色实时检测', (10, 90),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        
         return output_frame
 
 class RealTimeTracker:
@@ -509,6 +743,10 @@ class RealTimeTracker:
         
     def initialize(self):
         print('初始化实时追踪系统...')
+        
+        temp_dir = 'temp'
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir)
         
         self.cap = cv2.VideoCapture(0)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.config.CAMERA_WIDTH)
@@ -545,6 +783,7 @@ class RealTimeTracker:
         print('控制说明:')
         print('  - 按 q 键退出')
         print('  - 按 空格键 开始/暂停追踪')
+        print('  - 按 v 键强制触发一次 VLM 检测')
         print('  - 语音指令: "跟着红色盒子", "停止追踪", "恢复自动"')
         
         frame_count = 0
@@ -606,6 +845,9 @@ class RealTimeTracker:
                 print(status)
                 tts(status)
                 play_wav('temp/tts.wav')
+            elif key == ord('v'):
+                print('强制触发 VLM 检测...')
+                self.visual_detector._call_vlm_for_detection(frame)
         
         self.stop()
     
