@@ -6,9 +6,9 @@
 print('导入机械臂连接模块')
 
 from config import is_simulation_mode, PI_PORT, PI_BAUD
-import cv2
-import numpy as np
 import time
+
+# cv2 和 numpy 只在特定函数中需要，延迟导入以支持无opencv/numpy环境
 
 # 根据模式选择机器人接口
 if is_simulation_mode():
@@ -110,6 +110,19 @@ def top_view_shot(check=False):
     print('    移动至俯视姿态')
     move_to_top_view()
     
+    # 延迟导入 cv2，支持无opencv环境
+    try:
+        import cv2
+        HAS_CV2 = True
+    except ImportError:
+        HAS_CV2 = False
+        print('[警告] OpenCV (cv2) 未安装，无法执行拍照操作')
+        print('[提示] 如果是仿真模式测试，可以忽略此警告，拍照功能不会影响其他功能')
+        return None
+    
+    if not HAS_CV2:
+        return None
+    
     # 获取摄像头，传入0表示获取系统默认摄像头
     cap = cv2.VideoCapture(0)
     # 打开cap
@@ -148,6 +161,19 @@ def eye2hand(X_im=160, Y_im=120):
     '''
     输入目标点在图像中的像素坐标，转换为机械臂坐标
     '''
+    
+    # 延迟导入 numpy，支持无numpy环境
+    try:
+        import numpy as np
+        HAS_NUMPY = True
+    except ImportError:
+        HAS_NUMPY = False
+        print('[警告] numpy 未安装，无法执行坐标转换')
+        print('[提示] 如果是仿真模式测试，可以忽略此警告')
+        return None, None
+    
+    if not HAS_NUMPY:
+        return None, None
 
     # 整理两个标定点的坐标
     cali_1_im = [130, 290]                       # 左下角，第一个标定点的像素坐标，要手动填！
